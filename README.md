@@ -14,3 +14,10 @@ Dấu **!** đỏ trên đầu = sắp tấn công.
 
 ## Chạy
 Mở `index.html` bằng trình duyệt, hoặc bật GitHub Pages cho repo để chơi trên điện thoại (nên xoay ngang).
+
+## Bản Android (APK)
+File cài đặt: [`dist/NguoiQueTanCong.apk`](dist/NguoiQueTanCong.apk) (Android 7.0 trở lên).
+Tải về điện thoại → mở file → cho phép "Cài ứng dụng không rõ nguồn gốc" → Cài đặt.
+
+Build lại (không cần Android SDK/Gradle): xem `android/build.sh`. Ứng dụng là WebView chạy `index.html` offline,
+manifest/resources được đóng gói bằng `android/tools/mkapk.py`, ký bằng apksig (chữ ký v2).
