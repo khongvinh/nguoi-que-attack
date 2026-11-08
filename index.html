@@ -62,6 +62,9 @@ const sfx = {
   slam() { noise(0.5, 0.5, 400); tone(90, 30, 0.5, 'sine', 0.3); },
   up() { tone(400, 1200, 0.25, 'triangle', 0.08); },
   shoot() { tone(900, 500, 0.08, 'triangle', 0.04); },
+  pick() { tone(500, 900, 0.1, 'triangle', 0.07); tone(900, 1300, 0.1, 'sine', 0.04); },
+  toss() { noise(0.12, 0.12, 3000); tone(500, 250, 0.12, 'triangle', 0.05); },
+  block() { tone(1200, 1500, 0.15, 'square', 0.05); noise(0.1, 0.15, 5000); },
 };
 
 // ================== SCENERY ==================
@@ -126,9 +129,27 @@ const POSE = {
 };
 
 // ================== STATE ==================
-let state = 'menu', T = 0, P, enemies = [], arrows = [], parts = [], texts = [], bolts = [], waves = [], afterimg = [];
-let wave = 0, score = 0, combo = 0, comboT = 0, maxCombo = 0, shake = 0, hitstop = 0, toSpawn = [], spawnT = 0, clearT = 0, overT = 0, flash = 0, banner = 0;
-let up, cards = [], keys = {}, queued = null;
+let state = 'menu', T = 0, P, enemies = [], arrows = [], parts = [], texts = [], bolts = [], waves = [], afterimg = [], drops = [], thrown = [], rings = [];
+let wave = 0, score = 0, combo = 0, comboT = 0, maxCombo = 0, shake = 0, hitstop = 0, toSpawn = [], spawnT = 0, clearT = 0, overT = 0, flash = 0, banner = 0, skyT = 3, hint = 0;
+let up, cards = [], keys = {}, queued = null, mouse = [0, 0];
+
+// ---- weapons: m = dash damage multiplier, dur = durability (ammo for shuriken), td = throw damage,
+//      sp = throw speed, g = gravity on the thrown weapon, spin = spin speed (0 = points along flight)
+const WEAPONS = {
+  sword: { n: 'Kiếm', ic: '🗡️', m: 1.5, dur: 12, td: 40, sp: 760, g: 250, spin: 22, col: '#d6ecff' },
+  spear: { n: 'Giáo', ic: '🔱', m: 1.35, dur: 10, td: 45, sp: 860, g: 150, spin: 0, pierce: 1, reach: 12, col: '#ffd27a' },
+  axe: { n: 'Rìu', ic: '🪓', m: 1.8, dur: 8, td: 65, sp: 600, g: 700, spin: 16, col: '#ff9a6b' },
+  hammer: { n: 'Búa Sấm', ic: '🔨', m: 2.2, dur: 6, td: 55, sp: 560, g: 800, spin: 12, boom: 1, col: '#a99cff' },
+  shuriken: { n: 'Phi Tiêu', ic: '✴️', m: 1, dur: 6, td: 24, sp: 1000, g: 0, spin: 30, ammo: 1, col: '#7fe9ff' },
+};
+const DROPS = {
+  grunt: [['sword', 0.25], ['shuriken', 0.1]],
+  archer: [['shuriken', 0.35], ['spear', 0.15]],
+  brute: [['axe', 0.45], ['hammer', 0.25]],
+  boss: [['hammer', 1], ['spear', 1], ['axe', 1]],
+  bat: [],
+};
+const RAR = [{ n: 'Thường', c: '#8fa3d9' }, { n: 'Hiếm', c: '#4fd8ff' }, { n: 'Sử Thi', c: '#c27bff' }, { n: 'Huyền Thoại', c: '#ffb84d' }];
 let best = 0; try { best = +localStorage.getItem('nqtc_best') || 0; } catch (e) {}
 
 const TYPES = {
@@ -138,28 +159,51 @@ const TYPES = {
   brute: { hp: 130, sp: 55, s: 1.55, col: '#9b6bff', dmg: 22, rng: 52, pts: 40, wind: 0.75 },
   boss: { hp: 650, sp: 75, s: 2.5, col: '#ff2d55', dmg: 28, rng: 70, pts: 400, wind: 0.6 },
 };
+// r = rarity (0..3), w = first wave it can appear, max = how many times it can be taken
 const UPS = [
-  { n: 'Sấm Sét Mạnh', d: '+25% sát thương', f: () => up.dmg *= 1.25 },
-  { n: 'Tia Chớp Dài', d: '+20% tầm lướt', f: () => up.range *= 1.2 },
-  { n: 'Tiết Kiệm', d: '-15% năng lượng mỗi lần lướt', f: () => up.cost *= 0.85 },
-  { n: 'Nạp Điện', d: '+30% tốc độ hồi năng lượng', f: () => up.regen *= 1.3 },
-  { n: 'Thân Thép', d: '+25 máu tối đa', f: () => { P.mhp += 25; P.hp += 25; } },
-  { n: 'Hồi Sinh Lực', d: 'Hồi đầy máu', f: () => P.hp = P.mhp },
-  { n: 'Sét Lan', d: 'Mỗi đòn trúng giật lan sang 1 kẻ địch gần', f: () => up.chain++ },
-  { n: 'Hút Máu', d: 'Hồi 2 máu mỗi đòn trúng', f: () => up.ls += 2 },
-  { n: 'Chí Mạng', d: '+10% tỉ lệ chí mạng (x2 sát thương)', f: () => up.crit += 0.1 },
-  { n: 'Bình Điện Lớn', d: '+30 năng lượng tối đa', f: () => { P.men += 30; P.en = P.men; } },
+  { id: 'dmg', ic: '⚡', n: 'Sấm Sét Mạnh', d: '+25% sát thương', r: 0, w: 1, f: () => up.dmg *= 1.25 },
+  { id: 'range', ic: '💨', n: 'Tia Chớp Dài', d: '+20% tầm lướt', r: 0, w: 1, f: () => up.range *= 1.2 },
+  { id: 'cost', ic: '🔋', n: 'Tiết Kiệm', d: '-15% năng lượng mỗi lần lướt', r: 0, w: 1, max: 4, f: () => up.cost *= 0.85 },
+  { id: 'regen', ic: '🔌', n: 'Nạp Điện', d: '+30% tốc độ hồi năng lượng', r: 0, w: 1, f: () => up.regen *= 1.3 },
+  { id: 'hp', ic: '💪', n: 'Thân Thép', d: '+25 máu tối đa', r: 0, w: 1, f: () => { P.mhp += 25; P.hp += 25; } },
+  { id: 'heal', ic: '❤️', n: 'Hồi Sinh Lực', d: 'Hồi đầy máu', r: 0, w: 1, f: () => P.hp = P.mhp },
+  { id: 'men', ic: '🔵', n: 'Bình Điện Lớn', d: '+30 năng lượng tối đa', r: 0, w: 1, f: () => { P.men += 30; P.en = P.men; } },
+  { id: 'throw', ic: '🎯', n: 'Cánh Tay Mạnh', d: '+40% sát thương khi ném vũ khí', r: 0, w: 2, f: () => up.throwDmg *= 1.4 },
+  { id: 'dura', ic: '🔧', n: 'Thợ Rèn', d: 'Vũ khí bền hơn 50% (phi tiêu nhiều hơn)', r: 0, w: 2, max: 3, f: () => { up.dura *= 1.5; if (P.wpn) P.wpn.dur = Math.ceil(P.wpn.dur * 1.5); } },
+  { id: 'drop', ic: '🎁', n: 'Chiến Lợi Phẩm', d: 'Địch rơi vũ khí nhiều hơn 35%', r: 0, w: 2, max: 3, f: () => up.drop *= 1.35 },
+  { id: 'magnet', ic: '🧲', n: 'Nam Châm', d: 'Hút vũ khí rơi trên đất từ xa', r: 0, w: 2, max: 3, f: () => up.magnet++ },
+  { id: 'g_sword', ic: '🗡️', n: 'Kiếm Thép', d: 'Nhận ngay Kiếm: lướt x1.5 sát thương', r: 0, w: 2, f: () => equip('sword') },
+  { id: 'g_shuri', ic: '✴️', n: 'Túi Phi Tiêu', d: 'Nhận ngay 8 phi tiêu để ném', r: 0, w: 2, f: () => equip('shuriken', 8) },
+  { id: 'crit', ic: '💥', n: 'Chí Mạng', d: '+10% tỉ lệ chí mạng (x2 sát thương)', r: 1, w: 1, max: 5, f: () => up.crit += 0.1 },
+  { id: 'chain', ic: '🌀', n: 'Sét Lan', d: 'Đòn lướt giật lan sang thêm 1 kẻ địch gần', r: 1, w: 2, f: () => up.chain++ },
+  { id: 'ls', ic: '🩸', n: 'Hút Máu', d: 'Hồi 2 máu mỗi đòn trúng', r: 1, w: 2, f: () => up.ls += 2 },
+  { id: 'g_axe', ic: '🪓', n: 'Rìu Chiến', d: 'Nhận ngay Rìu: ném gây sát thương rất lớn', r: 1, w: 3, f: () => equip('axe') },
+  { id: 'g_spear', ic: '🔱', n: 'Giáo Dài', d: 'Nhận ngay Giáo: ném xuyên qua mọi kẻ địch', r: 1, w: 3, f: () => equip('spear') },
+  { id: 'shield', ic: '🛡️', n: 'Khiên Sét', d: 'Chặn 1 đòn, tự hồi sau 8 giây', r: 1, w: 3, max: 1, f: () => { up.shield = 1; P.shield = true; } },
+  { id: 'vamp', ic: '🧛', n: 'Ma Cà Rồng', d: 'Hồi 5 máu mỗi khi hạ 1 kẻ địch', r: 1, w: 3, f: () => up.vamp++ },
+  { id: 'armory', ic: '🎒', n: 'Kho Vũ Khí', d: 'Đầu mỗi đợt nhận 1 vũ khí ngẫu nhiên', r: 2, w: 4, max: 1, f: () => up.armory = 1 },
+  { id: 'multi', ic: '✌️', n: 'Ném Đôi', d: 'Mỗi lần ném bay thêm 1 bản sao vũ khí', r: 2, w: 4, max: 3, f: () => up.multi++ },
+  { id: 'storm', ic: '🌩️', n: 'Bão Sét', d: 'Cuối mỗi cú lướt nổ sét quanh người', r: 2, w: 5, f: () => up.storm++ },
+  { id: 'g_hammer', ic: '🔨', n: 'Búa Sấm', d: 'Nhận ngay Búa: ném ra tạo sóng chấn động', r: 2, w: 5, f: () => equip('hammer') },
+  { id: 'sky', ic: '☁️', n: 'Thần Sấm', d: 'Sét trời tự đánh kẻ địch mỗi vài giây', r: 2, w: 6, max: 4, f: () => up.sky++ },
+  { id: 'ret', ic: '🪃', n: 'Vũ Khí Hồi Về', d: 'Vũ khí ném ra tự bay về tay, chém địch trên đường về', r: 3, w: 6, max: 1, f: () => up.ret = 1 },
+  { id: 'rage', ic: '🔥', n: 'Cuồng Nộ', d: 'Combo từ 10 trở lên: +50% sát thương', r: 3, w: 7, max: 1, f: () => up.rage = 1 },
+  { id: 'revive', ic: '👼', n: 'Bất Tử', d: 'Hồi sinh 1 lần với 50% máu khi gục ngã', r: 3, w: 8, max: 1, f: () => up.revive = 1 },
 ];
 
 function newGame() {
-  P = { x: W / 2, y: GY, vx: 0, vy: 0, hp: 100, mhp: 100, en: 100, men: 100, f: 1, dash: null, slashT: 0, inv: 0, hurtT: 0, anim: 0, moving: false };
-  enemies = []; arrows = []; parts = []; texts = []; bolts = []; waves = []; afterimg = [];
-  wave = 0; score = 0; combo = 0; maxCombo = 0; queued = null;
-  up = { dmg: 1, range: 1, cost: 1, regen: 1, chain: 0, ls: 0, crit: 0.12 };
+  P = { x: W / 2, y: GY, vx: 0, vy: 0, hp: 100, mhp: 100, en: 100, men: 100, f: 1, dash: null, slashT: 0, inv: 0, hurtT: 0, anim: 0, moving: false,
+    wpn: null, shield: false, shT: 0 };
+  enemies = []; arrows = []; parts = []; texts = []; bolts = []; waves = []; afterimg = []; drops = []; thrown = []; rings = [];
+  wave = 0; score = 0; combo = 0; maxCombo = 0; queued = null; skyT = 3; hint = 0;
+  up = { dmg: 1, range: 1, cost: 1, regen: 1, chain: 0, ls: 0, crit: 0.12, throwDmg: 1, dura: 1, drop: 1, magnet: 0, shield: 0, vamp: 0,
+    armory: 0, multi: 1, storm: 0, sky: 0, ret: 0, rage: 0, revive: 0, owned: {} };
   nextWave(); state = 'play';
 }
 function nextWave() {
   wave++; banner = 2; toSpawn = []; spawnT = 1;
+  if (up.armory && !P.wpn) { const ks = Object.keys(WEAPONS); equip(ks[Math.random() * ks.length | 0]); }
+  if (up.shield) P.shield = true;
   const m = 1 + (wave - 1) * 0.12;
   if (wave % 5 === 0) {
     toSpawn.push({ type: 'boss', m: 1 + (wave / 5 - 1) * 0.6 });
@@ -192,14 +236,26 @@ cv.addEventListener('pointerdown', (ev) => {
   if (state === 'menu') { newGame(); return; }
   if (state === 'over') { if (overT > 0.8) newGame(); return; }
   if (state === 'upgrade') {
-    for (const c of cards) if (x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h) { c.u.f(); sfx.up(); P.hp = Math.min(P.mhp, P.hp + 15); nextWave(); state = 'play'; }
+    if (T - cardT < 0.4) return; // avoid picking a card with the tap that finished the wave
+    for (const c of cards) if (x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h) {
+      up.owned[c.u.id] = (up.owned[c.u.id] || 0) + 1; c.u.f(); sfx.up(); P.hp = Math.min(P.mhp, P.hp + 15); nextWave(); state = 'play'; break;
+    }
     return;
   }
-  if (state === 'play') { if (x > W - 54 && y < 54) { state = 'pause'; return; } tryDash(x, y); }
+  if (state === 'play') {
+    if (x > W - 54 && y < 54) { state = 'pause'; return; }
+    const [bx, by] = throwBtn();
+    if (P.wpn && Math.hypot(x - bx, y - by) < 46) { throwWeapon(); return; }
+    if (ev.button === 2) { throwWeapon(x, y); return; }
+    tryDash(x, y);
+  }
   else if (state === 'pause') state = 'play';
 });
+cv.addEventListener('contextmenu', (e) => e.preventDefault());
+cv.addEventListener('pointermove', (ev) => { mouse = toWorld(ev); });
 addEventListener('keydown', (e) => {
   keys[e.key.toLowerCase()] = true;
+  if ((e.key === 'f' || e.key === 'F') && state === 'play') throwWeapon();
   if ((e.key === 'p' || e.key === 'Escape') && (state === 'play' || state === 'pause')) state = state === 'play' ? 'pause' : 'play';
   if (e.key === ' ' && state === 'play') { // dash toward nearest enemy
     let n = null, nd = 1e9; for (const en of enemies) { const d = Math.abs(en.x - P.x); if (d < nd) { nd = d; n = en; } }
@@ -221,6 +277,129 @@ function tryDash(tx, ty) {
   P.dash = { sx, sy, ex, ey, t: 0, d: 0.075 + L / 6000, hit: new Set() };
   bolts.push({ pts: zig(sx, sy, ex, ey, 10, 14), life: 0.25, ml: 0.25, col: '#7fe9ff', w: 3 });
   sfx.zap();
+}
+// ================== WEAPONS ==================
+let cardT = 0;
+function throwBtn() { return [W - 66, H - 66]; }
+function say(s, col, x, y, sz) { if (texts.some(t => t.s === s && t.life > 0.4)) return; texts.push({ x: x ?? P.x, y: y ?? P.y - 70, s, col: col || '#fff', life: 1, vy: -35, sz: sz || 14 }); }
+function dmgMult() { return up.dmg * (up.rage && combo >= 10 ? 1.5 : 1); }
+function fullDur(k) { return Math.max(1, Math.round(WEAPONS[k].dur * up.dura)); }
+function equip(k, dur) {
+  dur = dur || fullDur(k);
+  if (P.wpn && P.wpn.k === k) { P.wpn.dur += dur; say('+' + WEAPONS[k].n, WEAPONS[k].col); return; }
+  if (P.wpn) addDrop(P.wpn.k, P.x, P.y - 20, P.wpn.dur, 0.9);
+  P.wpn = { k, dur };
+  say(WEAPONS[k].ic + ' ' + WEAPONS[k].n, WEAPONS[k].col, P.x, P.y - 70, 16);
+  if (hint < 1) { hint = 1; say('Bấm NÉM để phóng vũ khí!', '#ffe14d', W / 2, H * 0.45, 18); }
+  sfx.pick();
+}
+function addDrop(k, x, y, dur, cool) {
+  drops.push({ k, x: clamp(x, 20, W - 20), y, vy: -240, vx: rnd(-60, 60), dur: dur || fullDur(k), life: 16 + up.magnet * 5, cool: cool || 0, bob: Math.random() * 6 });
+}
+function nearestEnemies() {
+  return enemies.filter(e => e.hp > 0 && e.entered).map(e => { const c = eCenter(e); return { e, c, d: Math.hypot(c[0] - P.x, c[1] - P.y + 34) }; }).sort((a, b) => a.d - b.d);
+}
+function throwWeapon(tx, ty) {
+  if (!P.wpn) { say('Chưa có vũ khí — hạ địch để nhặt!', '#8fa3d9'); return; }
+  const k = P.wpn.k, sx = P.x, sy = P.y - 34, list = nearestEnemies();
+  const targets = [];
+  if (tx !== undefined) targets.push([tx, ty]);
+  for (const o of list) targets.push(o.c);
+  if (!targets.length) targets.push([sx + P.f * 400, sy]);
+  const n = up.multi; // the original + copies
+  for (let i = 0; i < n; i++) {
+    const t = targets[i] || [targets[0][0], targets[0][1] - 40 * i];
+    launch(k, sx, sy, t[0], t[1], i > 0, P.wpn.dur);
+  }
+  P.f = Math.sign(targets[0][0] - sx) || P.f;
+  if (WEAPONS[k].ammo) { P.wpn.dur--; if (P.wpn.dur <= 0) P.wpn = null; } else P.wpn = null;
+  P.slashT = 0.2; sfx.toss();
+}
+function launch(k, sx, sy, tx, ty, ghost, dur) {
+  const w = WEAPONS[k], d = Math.hypot(tx - sx, ty - sy), t = clamp(d / w.sp, 0.12, 1.1);
+  thrown.push({ k, x: sx, y: sy, vx: (tx - sx) / t, vy: (ty - sy) / t - 0.5 * w.g * t, rot: 0, hit: new Set(), ghost, dur, mode: 'fly', life: 3 });
+}
+function boom(x, y) {
+  shake = Math.max(shake, 12); sfx.slam();
+  for (const e of enemies) { const [ex, ey] = eCenter(e); if (Math.hypot(ex - x, ey - y) < 95) { hitEnemy(e, 30 * dmgMult() * up.throwDmg, Math.sign(ex - x) || 1, 0); e.stun = Math.max(e.stun, 0.8); } }
+  rings.push({ x, y, life: 0.35 });
+  for (let i = 0; i < 26; i++) { const a = i / 26 * 6.28; parts.push({ x, y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, life: 0.4, ml: 0.4, col: '#a99cff', sz: 3, g: 0 }); }
+}
+function endThrow(p) { // weapon hit something: break, return, or fall to the ground as a pickup
+  if (WEAPONS[p.k].ammo || p.ghost) { p.dead = true; sparks(p.x, p.y, WEAPONS[p.k].col, 6); return; }
+  p.dur--;
+  if (p.dur <= 0) { p.dead = true; sparks(p.x, p.y, '#ccc', 14); say(WEAPONS[p.k].n + ' đã gãy!', '#ff8fa3', p.x, p.y - 20, 13); return; }
+  if (up.ret) { p.mode = 'ret'; p.hit = new Set(); return; }
+  p.mode = 'fall'; p.vx *= -0.25; p.vy = -220;
+}
+function sparks(x, y, col, n) { for (let i = 0; i < n; i++) parts.push({ x, y, vx: rnd(-200, 200), vy: rnd(-220, 60), life: 0.35, ml: 0.35, col, sz: 2.5, g: 500 }); }
+
+function updWeapons(dt) {
+  // thrown weapons
+  for (const p of thrown) {
+    const w = WEAPONS[p.k]; p.life -= dt;
+    if (p.mode === 'ret') {
+      const dx = P.x - p.x, dy = P.y - 34 - p.y, d = Math.hypot(dx, dy) || 1, x0 = p.x, y0 = p.y;
+      p.vx = dx / d * 820; p.vy = dy / d * 820; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += 22 * dt;
+      for (const e of enemies) { if (p.hit.has(e) || e.hp <= 0) continue; const [ex, ey] = eCenter(e); if (segDist(ex, ey, x0, y0, p.x, p.y) < e.r + 12) { p.hit.add(e); hitEnemy(e, w.td * 0.6 * dmgMult() * up.throwDmg, Math.sign(p.vx) || 1, 0); } }
+      if (d < 28 || p.life < -3) { p.dead = true; if (!P.wpn || P.wpn.k === p.k) { if (P.wpn) P.wpn.dur += p.dur; else { P.wpn = { k: p.k, dur: p.dur }; } sfx.pick(); } else addDrop(p.k, P.x, P.y - 20, p.dur, 0.9); }
+      continue;
+    }
+    if (p.mode === 'fall') {
+      p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += 10 * dt;
+      if (p.y >= GY - 6) { p.dead = true; addDrop(p.k, p.x, GY - 6, p.dur); }
+      continue;
+    }
+    const x0 = p.x, y0 = p.y;
+    p.vy += w.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    p.rot = w.spin ? p.rot + w.spin * dt * Math.sign(p.vx || 1) : Math.atan2(p.vy, p.vx);
+    for (const e of enemies) {
+      if (p.hit.has(e) || e.hp <= 0) continue;
+      const [ex, ey] = eCenter(e);
+      if (segDist(ex, ey, x0, y0, p.x, p.y) < e.r + 10) {
+        p.hit.add(e); hitEnemy(e, w.td * dmgMult() * up.throwDmg, Math.sign(p.vx) || 1, 0);
+        if (w.boom) { boom(p.x, p.y); p.boomed = true; }
+        if (!w.pierce) { endThrow(p); break; }
+      }
+    }
+    for (const a of arrows) if (!a.dead && segDist(a.x, a.y, x0, y0, p.x, p.y) < 14) { a.dead = true; sparks(a.x, a.y, '#ffe14d', 5); }
+    if (p.mode === 'fly' && !p.dead && (p.y >= GY - 4 || p.x < 8 || p.x > W - 8 || p.life <= 0)) {
+      p.x = clamp(p.x, 8, W - 8); p.y = Math.min(p.y, GY - 4);
+      if (w.boom && !p.boomed) boom(p.x, p.y);
+      if (w.pierce && !p.ghost && !up.ret && p.y >= GY - 4) { p.dead = true; p.dur--; if (p.dur > 0) addDrop(p.k, p.x, GY - 6, p.dur); }
+      else endThrow(p);
+    }
+  }
+  thrown = thrown.filter(p => !p.dead);
+
+  // weapons lying on the ground
+  const pull = up.magnet ? 70 + up.magnet * 90 : 0;
+  for (const d of drops) {
+    if (d.dead) continue;
+    d.life -= dt; d.cool -= dt; d.vy += 900 * dt; d.y += d.vy * dt; d.x += d.vx * dt; d.vx *= Math.pow(0.05, dt);
+    if (d.y > GY - 6) { d.y = GY - 6; d.vy = 0; }
+    if (d.cool > 0) continue;
+    const can = !P.wpn || P.wpn.k === d.k, dx = P.x - d.x, dist = Math.hypot(dx, P.y - 20 - d.y);
+    if (can && pull && dist < pull) { d.x += dx / (dist || 1) * 380 * dt; }
+    if (can && Math.abs(dx) < 26 && Math.abs(P.y - 10 - d.y) < 45) { d.dead = true; equip(d.k, d.dur); }
+  }
+  drops = drops.filter(d => !d.dead && d.life > 0);
+
+  // passive items
+  if (up.shield && !P.shield) { P.shT -= dt; if (P.shT <= 0) { P.shield = true; say('🛡️ Khiên sẵn sàng', '#4fd8ff'); } }
+  if (up.sky && enemies.length) {
+    skyT -= dt;
+    if (skyT <= 0) {
+      skyT = 4 / (1 + 0.35 * (up.sky - 1));
+      const live = enemies.filter(e => e.hp > 0 && e.entered);
+      if (live.length) {
+        const e = live[Math.random() * live.length | 0], [ex, ey] = eCenter(e);
+        bolts.push({ pts: zig(ex + rnd(-30, 30), 0, ex, ey, 12, 18), life: 0.35, ml: 0.35, col: '#ffe14d', w: 4 });
+        shake = Math.max(shake, 5); sfx.zap();
+        hitEnemy(e, 30 * dmgMult(), 1, 0);
+      }
+    }
+  }
 }
 function zig(ax, ay, bx, by, n, amp) {
   const pts = [[ax, ay]], dx = bx - ax, dy = by - ay, l = Math.hypot(dx, dy) || 1, px = -dy / l, py = dx / l;
@@ -259,15 +438,23 @@ function killEnemy(e, dir) {
   for (let i = 0; i < (e.type === 'boss' ? 80 : 22); i++) parts.push({ x: ex + rnd(-10, 10) * e.s, y: ey + rnd(-20, 20) * e.s, vx: rnd(-300, 300) + dir * 120, vy: rnd(-400, 50), life: rnd(0.4, 0.9), ml: 0.9, col: i % 3 ? e.col : '#fff', sz: rnd(2, 5), g: 700 });
   texts.push({ x: ex, y: ey - 40 * e.s, s: '+' + pts, col: '#ffe14d', life: 0.9, vy: -50, sz: 14 });
   if (e.type === 'boss') { shake = 20; flash = 0.4; hitstop = 0.25; P.hp = Math.min(P.mhp, P.hp + 40); }
+  for (const [k, ch] of DROPS[e.type]) if (Math.random() < ch * up.drop) { addDrop(k, e.x + rnd(-20, 20), ey, 0); if (e.type !== 'boss') break; }
+  if (up.vamp) P.hp = Math.min(P.mhp, P.hp + 5 * up.vamp);
   if (Math.random() < 0.08 && P.hp < P.mhp) { P.hp = Math.min(P.mhp, P.hp + 10); texts.push({ x: ex, y: ey - 60, s: '+10 máu', col: '#5dff8f', life: 0.9, vy: -40, sz: 13 }); }
   sfx.kill();
 }
 function hurtPlayer(d, dir) {
   if (P.inv > 0 || P.dash || state !== 'play') return;
+  if (P.shield) { P.shield = false; P.shT = 8; P.inv = 0.6; say('CHẶN!', '#4fd8ff'); sparks(P.x, P.y - 30, '#4fd8ff', 16); sfx.block(); return; }
   P.hp -= d; P.inv = 0.8; P.hurtT = 0.3; P.vx = dir * 260; P.vy = -200; shake = 12; flash = 0.25; combo = 0;
   texts.push({ x: P.x, y: P.y - 60, s: '-' + d, col: '#ff4d6a', life: 0.8, vy: -50, sz: 18 });
   for (let i = 0; i < 12; i++) parts.push({ x: P.x, y: P.y - 30, vx: rnd(-200, 200), vy: rnd(-300, 0), life: 0.5, ml: 0.5, col: '#ff4d6a', sz: 3, g: 600 });
   sfx.hurt();
+  if (P.hp <= 0 && up.revive) {
+    up.revive = 0; P.hp = Math.round(P.mhp / 2); P.inv = 2.5; flash = 0.5; shake = 20; say('BẤT TỬ — HỒI SINH!', '#ffb84d', P.x, P.y - 80, 20);
+    for (const e of enemies) { const dx = e.x - P.x; if (Math.abs(dx) < 200) hitEnemy(e, 40 * dmgMult(), Math.sign(dx) || 1, 0); }
+    return;
+  }
   if (P.hp <= 0) {
     P.hp = 0; state = 'over'; overT = 0;
     if (score > best) { best = score; try { localStorage.setItem('nqtc_best', best); } catch (e) {} }
@@ -297,11 +484,19 @@ function update(dt) {
     for (const e of enemies) {
       if (D.hit.has(e) || e.hp <= 0) continue;
       const [ex, ey] = eCenter(e);
-      if (segDist(ex, ey, ax, ay, bx, by) < e.r + 16) { D.hit.add(e); hitEnemy(e, 20 * up.dmg, P.f, up.chain); }
+      const w = P.wpn && !WEAPONS[P.wpn.k].ammo ? WEAPONS[P.wpn.k] : null;
+      if (segDist(ex, ey, ax, ay, bx, by) < e.r + 16 + (w && w.reach || 0)) { D.hit.add(e); hitEnemy(e, 20 * dmgMult() * (w ? w.m : 1), P.f, up.chain); }
     }
+    for (const d of drops) if (d.cool <= 0 && !d.dead && segDist(d.x, d.y, ax, ay, bx, by) < 32) { d.dead = true; equip(d.k, d.dur); }
     for (const a of arrows) if (!a.dead && segDist(a.x, a.y, ax, ay, bx, by) < 20) { a.dead = true; score += 5; for (let i = 0; i < 6; i++) parts.push({ x: a.x, y: a.y, vx: rnd(-150, 150), vy: rnd(-150, 50), life: 0.3, ml: 0.3, col: '#ffe14d', sz: 2, g: 300 }); }
     if (k >= 1) {
       P.dash = null; P.slashT = 0.2; P.vx = 0; P.vy = P.y < GY - 2 ? -160 : 0; P.inv = Math.max(P.inv, 0.12);
+      if (D.hit.size && P.wpn && !WEAPONS[P.wpn.k].ammo && --P.wpn.dur <= 0) { sparks(P.x, P.y - 30, '#ccc', 14); say(WEAPONS[P.wpn.k].n + ' đã gãy!', '#ff8fa3'); P.wpn = null; }
+      if (up.storm) {
+        const cx0 = P.x, cy0 = P.y - 25, R = 70 + 15 * up.storm;
+        for (let i = 0; i < 6; i++) { const a = i / 6 * 6.28 + rnd(0, 1); bolts.push({ pts: zig(cx0, cy0, cx0 + Math.cos(a) * R, cy0 + Math.sin(a) * R, 4, 8), life: 0.2, ml: 0.2, col: '#c27bff', w: 2 }); }
+        for (const e of enemies) { const [ex, ey] = eCenter(e); if (Math.hypot(ex - cx0, ey - cy0) < R + e.r) hitEnemy(e, 10 * up.storm * dmgMult(), Math.sign(ex - cx0) || 1, 0); }
+      }
       if (queued) { const q = queued; queued = null; tryDash(q[0], q[1]); }
     }
   } else {
@@ -312,6 +507,9 @@ function update(dt) {
     if (P.y >= GY) { P.y = GY; P.vy = 0; }
     P.x = clamp(P.x, 12, W - 12);
   }
+
+  updWeapons(dt);
+  for (const r of rings) r.life -= dt; rings = rings.filter(r => r.life > 0);
 
   // ---- spawning ----
   spawnT -= dt;
@@ -340,7 +538,7 @@ function update(dt) {
 
   if (!toSpawn.length && !enemies.length) {
     clearT += dt;
-    if (clearT > 1.2) { clearT = 0; state = 'upgrade'; makeCards(); }
+    if (clearT > 1.2) { clearT = 0; state = 'upgrade'; cardT = T; makeCards(); }
   } else clearT = 0;
 }
 
@@ -430,9 +628,62 @@ function updEnemy(e, dt) {
 }
 
 function makeCards() {
-  const pool = UPS.slice(); cards = [];
-  const cw = Math.min(200, (W - 80) / 3), ch = 150, gap = 18, tot = cw * 3 + gap * 2;
-  for (let i = 0; i < 3; i++) { const u = pool.splice(Math.random() * pool.length | 0, 1)[0]; cards.push({ u, x: W / 2 - tot / 2 + i * (cw + gap), y: H / 2 - ch / 2 + 20, w: cw, h: ch }); }
+  // later waves unlock more items, rarer items, and a 4th card from wave 6
+  const rw = [60, 22 + wave * 2, wave >= 4 ? 6 + wave * 1.5 : 0, wave >= 6 ? 2 + wave * 0.6 : 0];
+  let pool = UPS.filter(u => u.w <= wave && !(u.max && (up.owned[u.id] || 0) >= u.max));
+  const n = wave >= 6 ? 4 : 3, gap = 14, cw = Math.min(185, (W - 40 - gap * (n - 1)) / n), ch = 172, tot = cw * n + gap * (n - 1);
+  cards = [];
+  for (let i = 0; i < n && pool.length; i++) {
+    const sum = pool.reduce((a, u) => a + rw[u.r], 0); let r = Math.random() * sum, pick = pool[0];
+    for (const u of pool) { r -= rw[u.r]; if (r <= 0) { pick = u; break; } }
+    pool = pool.filter(u => u !== pick);
+    cards.push({ u: pick, x: W / 2 - tot / 2 + i * (cw + gap), y: H / 2 - ch / 2 + 22, w: cw, h: ch });
+  }
+}
+// draws weapon k along +x with the grip at the origin
+function wDraw(k) {
+  cx.lineCap = 'round';
+  const wood = '#a8743f', steel = '#e6f2ff';
+  if (!k) { cx.strokeStyle = '#bff4ff'; cx.lineWidth = 2.2; cx.beginPath(); cx.moveTo(-4, 0); cx.lineTo(26, 0); cx.stroke(); return; }
+  if (k === 'sword') {
+    cx.strokeStyle = wood; cx.lineWidth = 3; cx.beginPath(); cx.moveTo(-4, 0); cx.lineTo(5, 0); cx.stroke();
+    cx.strokeStyle = '#ffe14d'; cx.beginPath(); cx.moveTo(5, -5); cx.lineTo(5, 5); cx.stroke();
+    cx.fillStyle = steel; cx.beginPath(); cx.moveTo(6, -2.5); cx.lineTo(30, -2); cx.lineTo(35, 0); cx.lineTo(30, 2); cx.lineTo(6, 2.5); cx.fill();
+  } else if (k === 'spear') {
+    cx.strokeStyle = wood; cx.lineWidth = 2.5; cx.beginPath(); cx.moveTo(-14, 0); cx.lineTo(38, 0); cx.stroke();
+    cx.fillStyle = steel; cx.beginPath(); cx.moveTo(36, -4); cx.lineTo(50, 0); cx.lineTo(36, 4); cx.fill();
+  } else if (k === 'axe') {
+    cx.strokeStyle = wood; cx.lineWidth = 3; cx.beginPath(); cx.moveTo(-4, 0); cx.lineTo(28, 0); cx.stroke();
+    cx.fillStyle = steel; cx.beginPath(); cx.moveTo(20, -2); cx.quadraticCurveTo(22, -16, 32, -15); cx.quadraticCurveTo(28, -6, 29, -2); cx.fill();
+    cx.beginPath(); cx.moveTo(20, 2); cx.lineTo(29, 2); cx.quadraticCurveTo(28, 8, 32, 12); cx.quadraticCurveTo(22, 12, 20, 2); cx.fill();
+  } else if (k === 'hammer') {
+    cx.strokeStyle = wood; cx.lineWidth = 3; cx.beginPath(); cx.moveTo(-4, 0); cx.lineTo(26, 0); cx.stroke();
+    cx.fillStyle = '#b9b2ff'; cx.fillRect(24, -9, 11, 18);
+    cx.strokeStyle = '#ffe14d'; cx.lineWidth = 1.5; cx.beginPath(); cx.moveTo(31, -6); cx.lineTo(27, 0); cx.lineTo(31, 0); cx.lineTo(27, 6); cx.stroke();
+  } else if (k === 'shuriken') {
+    cx.fillStyle = '#cfefff'; cx.beginPath();
+    for (let i = 0; i < 8; i++) { const a = i / 8 * 6.283, r = i % 2 ? 2.5 : 8; cx.lineTo(4 + Math.cos(a) * r, Math.sin(a) * r); }
+    cx.fill(); cx.fillStyle = '#0b0f24'; cx.beginPath(); cx.arc(4, 0, 1.5, 0, 7); cx.fill();
+  }
+}
+function drawItems() {
+  for (const d of drops) {
+    const w = WEAPONS[d.k], y = d.y - 6 - (d.vy === 0 ? Math.abs(Math.sin(T * 3 + d.bob)) * 5 : 0);
+    if (d.life < 4 && Math.floor(T * 8) % 2) continue; // blinking before it disappears
+    cx.save(); cx.translate(d.x, y);
+    const g = cx.createRadialGradient(0, 0, 2, 0, 0, 26); g.addColorStop(0, w.col + '88'); g.addColorStop(1, w.col + '00');
+    cx.fillStyle = g; cx.beginPath(); cx.arc(0, 0, 26, 0, 7); cx.fill();
+    cx.rotate(-0.6); cx.translate(-14, 0); wDraw(d.k); cx.restore();
+    if (w.ammo) txt('x' + d.dur, d.x + 14, y - 10, 10, '#fff');
+  }
+  for (const p of thrown) {
+    cx.save(); cx.translate(p.x, p.y); cx.rotate(p.rot); if (p.ghost) cx.globalAlpha = 0.6;
+    cx.shadowColor = WEAPONS[p.k].col; cx.shadowBlur = 10; cx.translate(-14, 0); wDraw(p.k); cx.restore();
+  }
+  for (const r of rings) {
+    const k = 1 - r.life / 0.35; cx.globalAlpha = r.life / 0.35; cx.strokeStyle = '#a99cff'; cx.lineWidth = 5;
+    cx.beginPath(); cx.arc(r.x, r.y, 95 * k, 0, 7); cx.stroke(); cx.globalAlpha = 1;
+  }
 }
 
 // ================== DRAW ==================
@@ -450,10 +701,11 @@ function drawPlayer() {
   if (P.inv > 0 && !P.dash && P.hurtT < 0.5 && Math.floor(T * 20) % 2) cx.globalAlpha = 0.4;
   cx.shadowColor = '#4fd8ff'; cx.shadowBlur = 12;
   stick(P.x, P.y, 1.15, '#ffffff', P.f, pose, (h) => {
-    if (!h) return; // katana
-    const a = h[2], L = 26;
-    cx.strokeStyle = '#bff4ff'; cx.lineWidth = 2.2;
-    cx.beginPath(); cx.moveTo(h[0] - Math.sin(a) * 4, h[1] - Math.cos(a) * 4); cx.lineTo(h[0] + Math.sin(a) * L, h[1] + Math.cos(a) * L); cx.stroke();
+    if (!h) return;
+    const a = h[2], k = P.wpn && !WEAPONS[P.wpn.k].ammo ? P.wpn.k : null;
+    cx.save(); cx.translate(h[0], h[1]); cx.rotate(Math.atan2(Math.cos(a), Math.sin(a))); cx.lineWidth = 2.2; wDraw(k); cx.restore();
+    if (P.wpn && WEAPONS[P.wpn.k].ammo) { cx.save(); cx.translate(-8, -30); cx.scale(0.7, 0.7); wDraw('shuriken'); cx.restore(); }
+    if (P.shield) { cx.strokeStyle = 'rgba(79,216,255,' + (0.35 + 0.2 * Math.sin(T * 5)) + ')'; cx.lineWidth = 2; cx.beginPath(); cx.arc(0, -30, 30, 0, 7); cx.stroke(); }
     if (P.slashT > 0) { cx.strokeStyle = 'rgba(127,233,255,' + P.slashT * 4 + ')'; cx.lineWidth = 4; cx.beginPath(); cx.arc(0, -35, 34, -1.2, 1.0); cx.stroke(); }
   });
   cx.shadowBlur = 0; cx.globalAlpha = 1;
@@ -522,6 +774,17 @@ function drawHUD() {
   bar(pad, pad + 20, 150, 9, P.en / P.men, '#4fd8ff', 'rgba(0,0,0,.45)');
   txt('Đợt ' + wave, W - 70, pad + 14, 16, '#fff', 'right');
   txt(score.toLocaleString('vi-VN') + ' điểm', W - 70, pad + 34, 13, '#ffe14d', 'right');
+  // held weapon + shield
+  if (P.wpn) { const w = WEAPONS[P.wpn.k]; txt(w.ic + ' ' + w.n + (w.ammo ? ' x' + P.wpn.dur : ' · bền ' + P.wpn.dur), pad, pad + 46, 13, w.col, 'left'); }
+  else txt('Tay không (katana)', pad, pad + 46, 12, '#8fa3d9', 'left', 'normal');
+  if (up.shield) txt(P.shield ? '🛡️' : '🛡️ ' + Math.ceil(P.shT) + 's', pad + 198, pad + 13, 13, P.shield ? '#4fd8ff' : '#667', 'left');
+  // throw button
+  const [bx, by] = throwBtn(), on = !!P.wpn;
+  cx.fillStyle = on ? 'rgba(79,216,255,.22)' : 'rgba(255,255,255,.08)'; cx.beginPath(); cx.arc(bx, by, 38, 0, 7); cx.fill();
+  cx.strokeStyle = on ? WEAPONS[P.wpn.k].col : 'rgba(255,255,255,.25)'; cx.lineWidth = 2.5; cx.stroke();
+  if (on) { cx.save(); cx.translate(bx - 8, by - 4); cx.rotate(-0.7); cx.translate(-14, 0); wDraw(P.wpn.k); cx.restore(); }
+  txt('NÉM', bx, by + 26, 11, on ? '#fff' : 'rgba(255,255,255,.4)');
+  if (on && WEAPONS[P.wpn.k].ammo) txt('x' + P.wpn.dur, bx + 24, by - 20, 12, '#ffe14d');
   // pause btn
   cx.fillStyle = 'rgba(255,255,255,.15)'; rr(W - 50, 10, 38, 38, 10); cx.fill(); cx.fillStyle = '#fff'; cx.fillRect(W - 37, 21, 4, 16); cx.fillRect(W - 29, 21, 4, 16);
   if (combo >= 3) {
@@ -549,22 +812,28 @@ function drawMenu() {
   cx.shadowBlur = 0;
   stick(W / 2, y0 + 150, 1.6, '#fff', 1, POSE.idle(T));
   if (Math.sin(T * 4) > -0.3) txt('Chạm để bắt đầu', W / 2, y0 + 200, 20, '#ffe14d');
-  txt('Chạm vào bất kỳ đâu để lướt như tia chớp — chém mọi kẻ địch trên đường đi', W / 2, y0 + 232, 13, '#c9d2ff', 'center', 'normal');
-  txt('Máy tính: chuột để lướt · A/D di chuyển · W nhảy · Space lướt tới địch gần nhất', W / 2, y0 + 252, 11, '#8f99cc', 'center', 'normal');
+  txt('Chạm để lướt như tia chớp · Nhặt vũ khí địch rơi · Bấm NÉM để phóng vũ khí', W / 2, y0 + 232, 13, '#c9d2ff', 'center', 'normal');
+  txt('Máy tính: chuột để lướt · A/D di chuyển · W nhảy · Space lướt tới địch gần nhất · F / chuột phải: ném', W / 2, y0 + 252, 11, '#8f99cc', 'center', 'normal');
   if (best) txt('Kỷ lục: ' + best.toLocaleString('vi-VN'), W / 2, y0 + 278, 14, '#fff');
   if (innerHeight > innerWidth) txt('↻ Xoay ngang điện thoại để chơi tốt hơn', W / 2, H - 30, 14, '#ff8fa3', 'center', 'normal');
 }
 function drawUpgrade() {
   overlay(0.6);
   txt('ĐỢT ' + wave + ' HOÀN THÀNH!', W / 2, H / 2 - 95, 30, '#5dff8f');
-  txt('Chọn một sức mạnh (+15 máu)', W / 2, H / 2 - 68, 14, '#c9d2ff', 'center', 'normal');
+  txt('Chọn một vật phẩm (+15 máu)' + (wave >= 6 ? ' · 4 lựa chọn' : ''), W / 2, H / 2 - 68, 14, '#c9d2ff', 'center', 'normal');
   for (const c of cards) {
+    const rc = RAR[c.u.r].c, cxm = c.x + c.w / 2;
     cx.fillStyle = '#1b2150'; rr(c.x, c.y, c.w, c.h, 14); cx.fill();
-    cx.strokeStyle = '#4fd8ff'; cx.lineWidth = 2; cx.stroke();
-    txt('⚡', c.x + c.w / 2, c.y + 38, 26, '#ffe14d');
-    txt(c.u.n, c.x + c.w / 2, c.y + 72, 16, '#fff');
-    wrap(c.u.d, c.x + c.w / 2, c.y + 96, c.w - 20, 15, 12, '#c9d2ff');
+    if (c.u.r >= 2) { cx.shadowColor = rc; cx.shadowBlur = 10 + 6 * Math.sin(T * 4); }
+    cx.strokeStyle = rc; cx.lineWidth = c.u.r ? 3 : 2; cx.stroke(); cx.shadowBlur = 0;
+    txt(RAR[c.u.r].n.toUpperCase(), cxm, c.y + 18, 10, rc);
+    txt(c.u.ic, cxm, c.y + 56, 28, '#fff');
+    const own = up.owned[c.u.id] || 0;
+    txt(c.u.n + (own ? ' (cấp ' + (own + 1) + ')' : ''), cxm, c.y + 88, 14, '#fff');
+    wrap(c.u.d, cxm, c.y + 110, c.w - 18, 15, 12, '#c9d2ff');
   }
+  const own = UPS.filter(u => up.owned[u.id]).map(u => u.ic + (up.owned[u.id] > 1 ? '×' + up.owned[u.id] : '')).join('  ');
+  if (own) txt('Đã có: ' + own, W / 2, H / 2 + 128, 13, '#c9d2ff', 'center', 'normal');
 }
 function wrap(s, x, y, mw, lh, sz, col) {
   cx.font = sz + 'px "Segoe UI",Roboto,sans-serif'; const words = s.split(' '); let line = '';
@@ -594,6 +863,7 @@ function draw() {
     for (const e of enemies) drawEnemy(e);
     cx.strokeStyle = '#ffd27a'; cx.lineWidth = 2;
     for (const a of arrows) { const ang = Math.atan2(a.vy, a.vx); cx.beginPath(); cx.moveTo(a.x, a.y); cx.lineTo(a.x - Math.cos(ang) * 18, a.y - Math.sin(ang) * 18); cx.stroke(); cx.fillStyle = '#fff'; cx.beginPath(); cx.arc(a.x, a.y, 2, 0, 7); cx.fill(); }
+    drawItems();
     drawPlayer();
   }
   for (const b of bolts) drawBolt(b);
