@@ -10,14 +10,29 @@ Game hành động người que chạy trên trình duyệt (HTML5 Canvas, một
 - Máy tính: chuột để lướt, A/D đi, W nhảy, Space lướt tới địch gần nhất, F/chuột phải ném, P tạm dừng.
 
 - **Vũ khí rơi từ địch**: lính kiếm rơi Kiếm/Phi tiêu, cung thủ rơi Phi tiêu/Giáo, đồ tể rơi Rìu/Búa Sấm, trùm rơi cả đống.
-  Đi vào để nhặt (khi tay không hoặc cùng loại), **lướt qua** để đổi vũ khí. Vũ khí làm đòn lướt mạnh hơn nhưng có độ bền.
+  Tỉ lệ rơi thấp và tối đa 3 món trên đất để màn hình gọn. Đi vào để nhặt (khi tay không hoặc cùng loại), **lướt qua** để đổi vũ khí. Vũ khí làm đòn lướt mạnh hơn nhưng có độ bền.
 - **Ném vũ khí**: nút **NÉM** góc phải (tự ngắm địch gần nhất), máy tính: phím F hoặc chuột phải (ném về phía con trỏ).
   Kiếm xoay, Giáo xuyên thấu, Rìu bay vòng cung sát thương lớn, Búa Sấm nổ sóng chấn động, Phi tiêu bay thẳng (nhiều phát).
   Vũ khí ném ra rơi xuống đất — lướt tới nhặt lại.
 - **28 vật phẩm nâng cấp**, chia 4 độ hiếm (Thường / Hiếm / Sử Thi / Huyền Thoại), mở khóa dần theo đợt; từ đợt 6 có 4 lựa chọn.
   Ví dụ: Nam Châm, Thợ Rèn, Kho Vũ Khí, Ném Đôi, Khiên Sét, Bão Sét, Thần Sấm, Vũ Khí Hồi Về, Cuồng Nộ, Bất Tử…
 
-Kẻ địch: lính kiếm (đỏ), cung thủ (cam), dơi (tím nhạt), đồ tể (tím), trùm (đỏ đội vương miện).
+- **Chiêu cuối – Thiên Lôi Giáng Thế**: đạt **100 combo** rồi lướt lên không trung → người que bay lên tụ sét rồi đấm thẳng xuống đất,
+  nổ toàn bộ mặt đất: đánh trúng mọi kẻ địch, xoá hết tên/bom/sét đang bay. Thanh "Chiêu cuối" ở giữa trên màn hình cho biết tiến độ.
+
+## Màn chơi
+Mỗi 5 đợt đổi màn (đợt thứ 5 là trùm), sau màn 4 quay vòng và mạnh hơn:
+1. **Đêm Trăng** – trùm *Chúa Tể Bóng Đêm*
+2. **Sa Mạc Hoàng Hôn** (bão cát) – trùm *Vua Cát*
+3. **Rừng Băng** (tuyết rơi) – trùm *Hiệp Sĩ Băng*
+4. **Núi Lửa** (tro lửa bay) – trùm *Quỷ Lửa*
+
+Trùm dùng chiêu giống người chơi, càng về sau càng nhiều chiêu: lướt sét (có vạch đỏ báo trước), ném 3 phi đao,
+bay lên bổ nhào (vòng đỏ dưới đất), combo 3 đòn (chém – hất tung – xoay tròn), dậm đất tạo sóng, húc.
+
+Kẻ địch: lính kiếm (đỏ), cung thủ (cam), dơi (tím nhạt), đồ tể (tím), **ninja** (xanh ngọc, lướt chém),
+**lính khiên** (bạc, chặn đòn trước mặt — đánh sau lưng), **lính bom** (vàng, lướt qua bom để đá văng),
+**pháp sư** (hồng, bay lơ lửng, gọi sét xuống vòng tròn), trùm (đội vương miện).
 Dấu **!** đỏ trên đầu = sắp tấn công.
 
 ## Chạy
