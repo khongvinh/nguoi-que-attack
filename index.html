@@ -84,6 +84,7 @@ const STAGES = [
     pool: { grunt: 1, archer: 1, bomber: 2, ninja: 2, shield: 2, mage: 2, brute: 2, bat: 1 }, boss: { n: 'QUỶ LỬA', col: '#ff6a2a', moves: ['swing', 'charge', 'bdash', 'bthrow', 'bdive', 'combo', 'slam'] } },
 ];
 const ALL_MOVES = ['swing', 'charge', 'bdash', 'bthrow', 'bdive', 'combo', 'slam'];
+function crowd() { return Math.pow(1.2, stageIdx(wave)); }
 function stageIdx(w) { return Math.floor((Math.max(1, w) - 1) / 5); }
 function stage() { return STAGES[stageIdx(wave) % STAGES.length]; }
 let stars = [], hills1 = [], hills2 = [], towers = [], pyramids = [], amb = [];
@@ -189,8 +190,31 @@ const POSE = {
 
 // ================== STATE ==================
 let state = 'menu', T = 0, P, enemies = [], arrows = [], parts = [], texts = [], bolts = [], waves = [], afterimg = [], drops = [], thrown = [], rings = [], bombs = [], marks = [], quake = null;
-let wave = 0, score = 0, combo = 0, comboT = 0, maxCombo = 0, shake = 0, hitstop = 0, toSpawn = [], spawnT = 0, clearT = 0, overT = 0, flash = 0, banner = 0, skyT = 3, hint = 0, ultNext = 100, wflash = 0, seen = new Set(), hintQ = [];
+let wave = 0, score = 0, combo = 0, comboT = 0, maxCombo = 0, shake = 0, hitstop = 0, toSpawn = [], spawnT = 0, clearT = 0, overT = 0, flash = 0, banner = 0, skyT = 3, hint = 0, ultNext = 50, wflash = 0, seen = new Set(), hintQ = [];
 let up, cards = [], keys = {}, queued = null, mouse = [0, 0];
+let sp = 0, tl = {}, cracks = [], fires = [], tornados = [], trails = [], treeBack = 'upgrade', treeSel = null;
+function lv(id) { return tl[id] || 0; }
+
+// ---- skill tree: points come from clearing waves (+1, boss +2) ----
+const TREE = [
+  { n: 'SẤM', col: '#4fd8ff', nodes: [
+    { id: 't_dash', ic: '⚡', n: 'Lướt Sét', d: '+15% sát thương mỗi cú lướt', max: 3, cost: 1 },
+    { id: 't_cost', ic: '🔋', n: 'Tia Kép', d: 'Lướt tốn ít hơn 10% năng lượng', max: 3, cost: 1, req: 't_dash' },
+    { id: 't_trail', ic: '🌩️', n: 'Sét Dư Chấn', d: 'Đường lướt nổ sét lần nữa sau 0.3 giây', max: 3, cost: 2, req: 't_cost' } ] },
+  { n: 'ĐỊA CHẤN', col: '#ffb347', nodes: [
+    { id: 't_pound', ic: '⬇️', n: 'Dộng Đất+', d: 'Dộng Đất: +30% sát thương, +40% phạm vi', max: 3, cost: 1 },
+    { id: 't_crack', ic: '〰️', n: 'Nứt Đất', d: 'Dộng Đất làm nứt đất chạy 2 bên, hất tung địch trên mặt đất', max: 3, cost: 2, req: 't_pound' },
+    { id: 't_fire', ic: '🔥', n: 'Dung Nham', d: 'Vết nứt phun lửa đốt địch trong 2 giây', max: 2, cost: 2, req: 't_crack' } ] },
+  { n: 'PHONG', col: '#5dff8f', nodes: [
+    { id: 't_up', ic: '⬆️', n: 'Hất Tung+', d: 'Hất Tung: +30% sát thương, rộng hơn 20%', max: 3, cost: 1 },
+    { id: 't_link', ic: '🔗', n: 'Liên Hoàn', d: 'Sau Hất Tung, cú lướt kế tiếp x2 sát thương (cấp 2: x2.5)', max: 2, cost: 2, req: 't_up' },
+    { id: 't_tornado', ic: '🌪️', n: 'Lốc Xoáy', d: 'Hất Tung tạo lốc xoáy cuốn và chém địch', max: 2, cost: 2, req: 't_link' } ] },
+  { n: 'SINH LỰC', col: '#ff8fa3', nodes: [
+    { id: 't_hp', ic: '❤️', n: 'Cường Thể', d: '+20 máu tối đa', max: 3, cost: 1 },
+    { id: 't_regen', ic: '💧', n: 'Hồi Phục', d: 'Tự hồi 1 máu mỗi giây', max: 3, cost: 1, req: 't_hp' },
+    { id: 't_ult', ic: '💥', n: 'Nộ Khí', d: 'Chiêu cuối cần ít hơn 5 combo và mạnh hơn 20%', max: 3, cost: 2, req: 't_regen' } ] },
+];
+const TNODE = {}; for (const b of TREE) for (const nd of b.nodes) TNODE[nd.id] = nd;
 
 // ---- weapons: m = dash damage multiplier, dur = durability (ammo for shuriken), td = throw damage,
 //      sp = throw speed, g = gravity on the thrown weapon, spin = spin speed (0 = points along flight)
@@ -242,7 +266,7 @@ const UPS = [
   { id: 'heal', ic: '❤️', n: 'Hồi Sinh Lực', d: 'Hồi đầy máu', r: 0, w: 1, f: () => P.hp = P.mhp },
   { id: 'men', ic: '🔵', n: 'Bình Điện Lớn', d: '+30 năng lượng tối đa', r: 0, w: 1, f: () => { P.men += 30; P.en = P.men; } },
   { id: 'throw', ic: '🎯', n: 'Cánh Tay Mạnh', d: '+40% sát thương khi ném vũ khí', r: 0, w: 2, f: () => up.throwDmg *= 1.4 },
-  { id: 'dura', ic: '🔧', n: 'Thợ Rèn', d: 'Vũ khí bền hơn 50% (phi tiêu nhiều hơn)', r: 0, w: 2, max: 3, f: () => { up.dura *= 1.5; if (P.wpn) P.wpn.dur = Math.ceil(P.wpn.dur * 1.5); } },
+  { id: 'dura', ic: '🔧', n: 'Thợ Rèn', d: 'Vũ khí chém bền hơn 50% (phi tiêu nhiều hơn)', r: 0, w: 2, max: 3, f: () => { up.dura *= 1.5; if (P.wpn) P.wpn.dur = Math.ceil(P.wpn.dur * 1.5); } },
   { id: 'drop', ic: '🎁', n: 'Chiến Lợi Phẩm', d: 'Địch rơi vũ khí nhiều hơn 35%', r: 0, w: 2, max: 3, f: () => up.drop *= 1.35 },
   { id: 'magnet', ic: '🧲', n: 'Nam Châm', d: 'Hút vũ khí rơi trên đất từ xa', r: 0, w: 2, max: 3, f: () => up.magnet++ },
   { id: 'g_sword', ic: '🗡️', n: 'Kiếm Thép', d: 'Nhận ngay Kiếm: lướt x1.5 sát thương', r: 0, w: 2, f: () => equip('sword') },
@@ -259,16 +283,16 @@ const UPS = [
   { id: 'storm', ic: '🌩️', n: 'Bão Sét', d: 'Cuối mỗi cú lướt nổ sét quanh người', r: 2, w: 5, f: () => up.storm++ },
   { id: 'g_hammer', ic: '🔨', n: 'Búa Sấm', d: 'Nhận ngay Búa: ném ra tạo sóng chấn động', r: 2, w: 5, f: () => equip('hammer') },
   { id: 'sky', ic: '☁️', n: 'Thần Sấm', d: 'Sét trời tự đánh kẻ địch mỗi vài giây', r: 2, w: 6, max: 4, f: () => up.sky++ },
-  { id: 'ret', ic: '🪃', n: 'Vũ Khí Hồi Về', d: 'Vũ khí ném ra tự bay về tay, chém địch trên đường về', r: 3, w: 6, max: 1, f: () => up.ret = 1 },
   { id: 'rage', ic: '🔥', n: 'Cuồng Nộ', d: 'Combo từ 10 trở lên: +50% sát thương', r: 3, w: 7, max: 1, f: () => up.rage = 1 },
   { id: 'revive', ic: '👼', n: 'Bất Tử', d: 'Hồi sinh 1 lần với 50% máu khi gục ngã', r: 3, w: 8, max: 1, f: () => up.revive = 1 },
 ];
 
 function newGame() {
   P = { x: W / 2, y: GY, vx: 0, vy: 0, hp: 100, mhp: 100, en: 100, men: 100, f: 1, dash: null, slashT: 0, inv: 0, hurtT: 0, anim: 0, moving: false,
-    wpn: null, shield: false, shT: 0, ult: false, ultA: null };
+    wpn: null, shield: false, shT: 0, ult: false, ultA: null, pound: null, upT: 0, upCd: 0, linkT: 0 };
   enemies = []; arrows = []; parts = []; texts = []; bolts = []; waves = []; afterimg = []; drops = []; thrown = []; rings = []; bombs = []; marks = []; quake = null;
-  wave = 0; score = 0; combo = 0; maxCombo = 0; queued = null; skyT = 3; hint = 0; ultNext = 100; seen = new Set(); hintQ = [];
+  wave = 0; score = 0; combo = 0; maxCombo = 0; queued = null; skyT = 3; hint = 0; ultNext = 50; seen = new Set(); hintQ = ['Vuốt LÊN: Hất Tung · Đang trên không vuốt XUỐNG: Dộng Đất', 'Vuốt nhanh về phía địch để ném vũ khí'];
+  sp = 1; tl = {}; cracks = []; fires = []; tornados = []; trails = [];
   up = { dmg: 1, range: 1, cost: 1, regen: 1, chain: 0, ls: 0, crit: 0.12, throwDmg: 1, dura: 1, drop: 1, magnet: 0, shield: 0, vamp: 0,
     armory: 0, multi: 1, storm: 0, sky: 0, ret: 0, rage: 0, revive: 0, owned: {} };
   nextWave(); state = 'play';
@@ -287,9 +311,9 @@ function nextWave() {
   const pick = () => pool[Math.random() * pool.length | 0];
   if (wave % 5 === 0) {
     toSpawn.push({ type: 'boss', m: 1 + si * 0.6, si });
-    for (let i = 0; i < si + 2; i++) toSpawn.push({ type: pick(), m });
+    for (let i = 0; i < Math.round((si + 2) * crowd()); i++) toSpawn.push({ type: pick(), m });
   } else {
-    const n = Math.min(3 + wave * 2, 28);
+    const n = Math.round(Math.min(3 + wave * 2, 28) * crowd()); // +20% enemies per wave for every stage cleared
     for (let i = 0; i < n; i++) toSpawn.push({ type: pick(), m });
   }
 }
@@ -314,25 +338,59 @@ cv.addEventListener('pointerdown', (ev) => {
   if (state === 'over') { if (overT > 0.8) newGame(); return; }
   if (state === 'upgrade') {
     if (T - cardT < 0.4) return; // avoid picking a card with the tap that finished the wave
+    const tb = treeBtn(); if (x > tb[0] && x < tb[0] + tb[2] && y > tb[1] && y < tb[1] + tb[3]) { openTree('upgrade'); return; }
     for (const c of cards) if (x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h) {
       up.owned[c.u.id] = (up.owned[c.u.id] || 0) + 1; c.u.f(); sfx.up(); P.hp = Math.min(P.mhp, P.hp + 15); nextWave(); state = 'play'; break;
     }
     return;
   }
+  if (state === 'tree') { treeTap(x, y); return; }
   if (state === 'play') {
     if (x > W - 54 && y < 54) { state = 'pause'; return; }
-    const [bx, by] = throwBtn();
-    if (P.wpn && Math.hypot(x - bx, y - by) < 46) { throwWeapon(); return; }
     if (ev.button === 2) { throwWeapon(x, y); return; }
-    tryDash(x, y);
+    // tap = dash (decided on release or after a short hold); quick swipe = gesture
+    ptr = { id: ev.pointerId, x, y, t: performance.now(), done: false };
   }
-  else if (state === 'pause') state = 'play';
+  else if (state === 'pause') {
+    const b = pauseTreeBtn();
+    if (x > b[0] && x < b[0] + b[2] && y > b[1] && y < b[1] + b[3]) { openTree('pause'); return; }
+    state = 'play';
+  }
 });
 cv.addEventListener('contextmenu', (e) => e.preventDefault());
-cv.addEventListener('pointermove', (ev) => { mouse = toWorld(ev); });
+cv.addEventListener('pointermove', (ev) => {
+  mouse = toWorld(ev);
+  if (!ptr || ptr.done || ev.pointerId !== ptr.id || state !== 'play') return;
+  const [x, y] = mouse, dx = x - ptr.x, dy = y - ptr.y;
+  if (Math.hypot(dx, dy) > 38 && performance.now() - ptr.t < 300) { ptr.done = true; flick(dx, dy); }
+});
+const endPtr = (ev) => {
+  if (!ptr || ev.pointerId !== ptr.id) return;
+  if (!ptr.done && state === 'play') tryDash(ptr.x, ptr.y);
+  ptr = null;
+};
+cv.addEventListener('pointerup', endPtr);
+cv.addEventListener('pointercancel', (ev) => { if (ptr && ev.pointerId === ptr.id) ptr = null; });
+let ptr = null;
+// swipe: down while airborne = ground pound, up on the ground = uppercut, any other direction = throw (or dash without a weapon)
+function flick(dx, dy) {
+  const d = Math.hypot(dx, dy), ux = dx / d, uy = dy / d, air = P.y < GY - 30;
+  if (uy > 0.8 && air) return groundPound();
+  if (uy < -0.8 && !air) return uppercut();
+  if (uy > 0.8) { say('Bay lên rồi vuốt XUỐNG để Dộng Đất', '#ffb347'); return; }
+  const sx = P.x, sy = P.y - 34;
+  if (!P.wpn) { tryDash(sx + ux * 230, sy + uy * 230); return; }
+  // aim assist: the enemy closest to the swipe direction (within ~20 degrees)
+  let best = null, bd = 0.35;
+  for (const e of enemies) { if (!e.entered || e.hp <= 0) continue; const [ex, ey] = eCenter(e); const a = Math.abs(Math.atan2(ey - sy, ex - sx) - Math.atan2(uy, ux)); const da = Math.min(a, 6.283 - a); if (da < bd) { bd = da; best = [ex, ey]; } }
+  if (best) throwWeapon(best[0], best[1]); else throwWeapon(sx + ux * 500, sy + uy * 500);
+}
 addEventListener('keydown', (e) => {
   keys[e.key.toLowerCase()] = true;
-  if ((e.key === 'f' || e.key === 'F') && state === 'play') throwWeapon();
+  if ((e.key === 'f' || e.key === 'F') && state === 'play') throwWeapon(mouse[0], mouse[1]);
+  if ((e.key === 's' || e.key === 'S') && state === 'play') groundPound();
+  if ((e.key === 'e' || e.key === 'E') && state === 'play') uppercut();
+  if ((e.key === 't' || e.key === 'T') && (state === 'play' || state === 'pause' || state === 'upgrade')) openTree(state);
   if ((e.key === 'p' || e.key === 'Escape') && (state === 'play' || state === 'pause')) state = state === 'play' ? 'pause' : 'play';
   if (e.key === ' ' && state === 'play') { // dash toward nearest enemy
     let n = null, nd = 1e9; for (const en of enemies) { const d = Math.abs(en.x - P.x); if (d < nd) { nd = d; n = en; } }
@@ -346,7 +404,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && sta
 function tryDash(tx, ty) {
   if (P.ultA) return;
   if (P.dash) { queued = [tx, ty]; return; }
-  const cost = 18 * up.cost;
+  const cost = 18 * up.cost * (1 - 0.1 * lv('t_cost'));
   if (P.en < cost) { say('Hết năng lượng!', '#7fd4ff', P.x, P.y - 60, 13); return; }
   const sx = P.x, sy = P.y - 25; let dx = tx - sx, dy = ty - sy; const d = Math.hypot(dx, dy) || 1;
   const L = Math.min(d, 250 * up.range); dx /= d; dy /= d;
@@ -358,7 +416,6 @@ function tryDash(tx, ty) {
 }
 // ================== WEAPONS ==================
 let cardT = 0;
-function throwBtn() { return [W - 66, H - 66]; }
 function say(s, col, x, y, sz) { if (texts.some(t => t.s === s && t.life > 0.4)) return; texts.push({ x: x ?? P.x, y: y ?? P.y - 70, s, col: col || '#fff', life: 1, vy: -35, sz: sz || 14 }); }
 function dmgMult() { return up.dmg * (up.rage && combo >= 10 ? 1.5 : 1); }
 function fullDur(k) { return Math.max(1, Math.round(WEAPONS[k].dur * up.dura)); }
@@ -368,7 +425,7 @@ function equip(k, dur) {
   if (P.wpn) addDrop(P.wpn.k, P.x, P.y - 20, P.wpn.dur, 0.9);
   P.wpn = { k, dur };
   say(WEAPONS[k].ic + ' ' + WEAPONS[k].n, WEAPONS[k].col, P.x, P.y - 70, 16);
-  if (hint < 1) { hint = 1; say('Bấm NÉM để phóng vũ khí!', '#ffe14d', W / 2, H * 0.45, 18); }
+  if (hint < 1) { hint = 1; say('Vuốt nhanh về phía địch để NÉM (ném xong vũ khí vỡ)', '#ffe14d', W / 2, H * 0.45, 16); }
   sfx.pick();
 }
 function addDrop(k, x, y, dur, cool) {
@@ -404,12 +461,8 @@ function boom(x, y) {
   rings.push({ x, y, life: 0.35 });
   for (let i = 0; i < 26; i++) { const a = i / 26 * 6.28; parts.push({ x, y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, life: 0.4, ml: 0.4, col: '#a99cff', sz: 3, g: 0 }); }
 }
-function endThrow(p) { // weapon hit something: break, return, or fall to the ground as a pickup
-  if (WEAPONS[p.k].ammo || p.ghost) { p.dead = true; sparks(p.x, p.y, WEAPONS[p.k].col, 6); return; }
-  p.dur--;
-  if (p.dur <= 0) { p.dead = true; sparks(p.x, p.y, '#ccc', 14); say(WEAPONS[p.k].n + ' đã gãy!', '#ff8fa3', p.x, p.y - 20, 13); return; }
-  if (up.ret) { p.mode = 'ret'; p.hit = new Set(); return; }
-  p.mode = 'fall'; p.vx *= -0.25; p.vy = -220;
+function endThrow(p) { // a thrown weapon is single-use: it shatters on impact
+  p.dead = true; sparks(p.x, p.y, WEAPONS[p.k].col, 10); sparks(p.x, p.y, '#ccc', 6);
 }
 function sparks(x, y, col, n) { for (let i = 0; i < n; i++) parts.push({ x, y, vx: rnd(-200, 200), vy: rnd(-220, 60), life: 0.35, ml: 0.35, col, sz: 2.5, g: 500 }); }
 
@@ -417,18 +470,6 @@ function updWeapons(dt) {
   // thrown weapons
   for (const p of thrown) {
     const w = WEAPONS[p.k]; p.life -= dt;
-    if (p.mode === 'ret') {
-      const dx = P.x - p.x, dy = P.y - 34 - p.y, d = Math.hypot(dx, dy) || 1, x0 = p.x, y0 = p.y;
-      p.vx = dx / d * 820; p.vy = dy / d * 820; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += 22 * dt;
-      for (const e of enemies) { if (p.hit.has(e) || e.hp <= 0) continue; const [ex, ey] = eCenter(e); if (segDist(ex, ey, x0, y0, p.x, p.y) < e.r + 12) { p.hit.add(e); hitEnemy(e, w.td * 0.6 * dmgMult() * up.throwDmg, Math.sign(p.vx) || 1, 0); } }
-      if (d < 28 || p.life < -3) { p.dead = true; if (!P.wpn || P.wpn.k === p.k) { if (P.wpn) P.wpn.dur += p.dur; else { P.wpn = { k: p.k, dur: p.dur }; } sfx.pick(); } else addDrop(p.k, P.x, P.y - 20, p.dur, 0.9); }
-      continue;
-    }
-    if (p.mode === 'fall') {
-      p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += 10 * dt;
-      if (p.y >= GY - 6) { p.dead = true; addDrop(p.k, p.x, GY - 6, p.dur); }
-      continue;
-    }
     const x0 = p.x, y0 = p.y;
     p.vy += w.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
     p.rot = w.spin ? p.rot + w.spin * dt * Math.sign(p.vx || 1) : Math.atan2(p.vy, p.vx);
@@ -445,8 +486,7 @@ function updWeapons(dt) {
     if (p.mode === 'fly' && !p.dead && (p.y >= GY - 4 || p.x < 8 || p.x > W - 8 || p.life <= 0)) {
       p.x = clamp(p.x, 8, W - 8); p.y = Math.min(p.y, GY - 4);
       if (w.boom && !p.boomed) boom(p.x, p.y);
-      if (w.pierce && !p.ghost && !up.ret && p.y >= GY - 4) { p.dead = true; p.dur--; if (p.dur > 0) addDrop(p.k, p.x, GY - 6, p.dur); }
-      else endThrow(p);
+      endThrow(p);
     }
   }
   thrown = thrown.filter(p => !p.dead);
@@ -551,7 +591,157 @@ function hurtPlayer(d, dir) {
   }
 }
 
+// ================== ACTIVE SKILLS ==================
+function groundPound() { // swipe down while airborne
+  if (P.ultA || P.pound) return;
+  if (P.y > GY - 30) { say('Bay lên rồi vuốt XUỐNG để Dộng Đất', '#ffb347'); return; }
+  const c = 15 * up.cost; if (P.en < c) { say('Hết năng lượng!', '#7fd4ff', P.x, P.y - 60, 13); return; }
+  P.en -= c; P.dash = null; queued = null; P.pound = { h0: P.y }; P.vy = 1200; P.inv = Math.max(P.inv, 0.2); sfx.zap();
+}
+function updPound(dt) {
+  P.vy = Math.min(2600, P.vy + 6000 * dt); P.y += P.vy * dt; P.inv = Math.max(P.inv, 0.05);
+  afterimg.push({ x: P.x, y: P.y, f: P.f, life: 0.18 });
+  if (P.y >= GY) { P.y = GY; P.vy = 0; const h = GY - P.pound.h0; P.pound = null; P.slashT = 0.2; poundLand(h); }
+}
+function poundLand(h) {
+  const L = lv('t_pound'), hk = 1 + Math.min(1, h / 250), R = (110 + h * 0.25) * (1 + 0.4 * L), dmg = 22 * dmgMult() * (1 + 0.3 * L) * hk;
+  shake = Math.max(shake, 12 + 6 * hk); sfx.slam(); hitstop = Math.max(hitstop, 0.05);
+  rings.push({ x: P.x, y: GY, life: 0.35, R, col: '#ffb347' });
+  for (let i = 0; i < 26; i++) parts.push({ x: P.x + rnd(-R / 2, R / 2), y: GY, vx: rnd(-200, 200), vy: rnd(-420, -120), life: 0.6, ml: 0.6, col: i % 3 ? '#8a6a4a' : stage().line, sz: rnd(3, 5), g: 900 });
+  for (const e of enemies) {
+    const [ex, ey] = eCenter(e), dx = ex - P.x;
+    if (Math.abs(dx) < R + e.r && ey > GY - 140) { hitEnemy(e, dmg, Math.sign(dx) || 1, 0, true); if (e.type !== 'boss' && e.hp > 0) { e.vy = -380; if (!TYPES[e.type].fly && !TYPES[e.type].hover) e.air = true; e.stun = Math.max(e.stun, 0.6); } }
+  }
+  const C = lv('t_crack');
+  for (const dir of [-1, 1]) cracks.push({ x: P.x, dir, dist: 0, max: C ? 180 + 120 * C : R * 0.7, dmg: C ? 16 * dmgMult() * (1 + 0.3 * C) : 0, hit: new Set(), pts: [[P.x, GY]], life: 0.8, fire: lv('t_fire') });
+}
+function uppercut() { // swipe up on the ground: launches nearby enemies and the player
+  if (P.ultA || P.pound || P.dash || P.upCd > 0) return;
+  const c = 15 * up.cost; if (P.en < c) { say('Hết năng lượng!', '#7fd4ff', P.x, P.y - 60, 13); return; }
+  P.en -= c; P.upCd = 0.6; P.upT = 0.35; P.vy = -640; P.y = Math.min(P.y, GY - 2);
+  const L = lv('t_up'), R = 75 * (1 + 0.2 * L), dmg = 20 * dmgMult() * (1 + 0.3 * L), cx0 = P.x + P.f * 25, cy0 = GY - 40;
+  bolts.push({ pts: zig(cx0, GY, cx0 + P.f * 10, GY - 160, 8, 12), life: 0.25, ml: 0.25, col: '#5dff8f', w: 3 });
+  for (let i = 0; i < 14; i++) parts.push({ x: cx0 + rnd(-R / 2, R / 2), y: GY, vx: rnd(-60, 60), vy: rnd(-500, -200), life: 0.5, ml: 0.5, col: i % 2 ? '#5dff8f' : '#fff', sz: 3, g: 700 });
+  for (const e of enemies) {
+    const [ex, ey] = eCenter(e);
+    if (Math.hypot(ex - cx0, (ey - cy0) * 0.6) < R + e.r) {
+      hitEnemy(e, dmg, P.f, 0, true);
+      if (e.type !== 'boss' && e.hp > 0) { const light = TYPES[e.type].fly || TYPES[e.type].hover; e.vy = light ? -300 : -680; if (!light) e.air = true; e.stun = Math.max(e.stun, 1.0); }
+    }
+  }
+  if (lv('t_link')) P.linkT = 1.5;
+  if (lv('t_tornado')) { const d = 1.2 + 0.8 * lv('t_tornado'); tornados.push({ x: cx0, dir: P.f, life: d, hitT: 0 }); }
+  sfx.toss(); sfx.zap();
+}
+function updSkills(dt) {
+  for (const c of cracks) {
+    if (c.dist < c.max) {
+      const step = Math.min(650 * dt, c.max - c.dist); c.dist += step; c.x += c.dir * step;
+      if (c.x < 0 || c.x > W) c.dist = c.max;
+      c.pts.push([c.x, GY + rnd(1, 7)]);
+      if (Math.random() < 0.6) parts.push({ x: c.x, y: GY, vx: rnd(-60, 60), vy: rnd(-260, -80), life: 0.4, ml: 0.4, col: '#8a6a4a', sz: 3, g: 900 });
+      if (c.dmg) for (const e of enemies) {
+        if (c.hit.has(e) || e.hp <= 0 || TYPES[e.type].fly || TYPES[e.type].hover) continue;
+        if (Math.abs(e.x - c.x) < 18 + e.r * 0.5 && e.y > GY - 30) { c.hit.add(e); hitEnemy(e, c.dmg, c.dir, 0, true); if (e.type !== 'boss' && e.hp > 0) { e.vy = -460; e.air = true; e.stun = Math.max(e.stun, 0.8); } }
+      }
+      if (c.fire && (c.lastF === undefined || Math.abs(c.x - c.lastF) > 26)) { c.lastF = c.x; fires.push({ x: c.x, life: 2, dps: 12 * c.fire * dmgMult() }); }
+    } else c.life -= dt;
+  }
+  cracks = cracks.filter(c => c.life > 0);
+  for (const f of fires) {
+    f.life -= dt;
+    for (const e of enemies) if (e.hp > 0 && !TYPES[e.type].fly && !TYPES[e.type].hover && Math.abs(e.x - f.x) < 16 && e.y > GY - 20) { e.hp -= f.dps * dt; e.hitT = 0.05; if (e.hp <= 0) killEnemy(e, 1); }
+    if (Math.random() < 0.25) parts.push({ x: f.x + rnd(-8, 8), y: GY - 4, vx: rnd(-15, 15), vy: rnd(-90, -40), life: 0.4, ml: 0.4, col: Math.random() < 0.5 ? '#ff6a2a' : '#ffd23b', sz: 2.5, g: 0 });
+  }
+  fires = fires.filter(f => f.life > 0);
+  for (const t of tornados) {
+    t.life -= dt; t.x += t.dir * 90 * dt; t.hitT -= dt;
+    if (t.hitT <= 0) {
+      t.hitT = 0.3;
+      for (const e of enemies) { const [ex, ey] = eCenter(e); if (Math.abs(ex - t.x) < 45 && ey > GY - 170) { hitEnemy(e, 8 * dmgMult(), t.dir, 0, true); if (e.type !== 'boss' && e.hp > 0) { e.vy = -260; if (!TYPES[e.type].fly && !TYPES[e.type].hover) e.air = true; e.x += (t.x - e.x) * 0.3; } } }
+    }
+  }
+  tornados = tornados.filter(t => t.life > 0 && t.x > -40 && t.x < W + 40);
+  for (const tr of trails) {
+    tr.t -= dt;
+    if (tr.t <= 0) {
+      bolts.push({ pts: zig(tr.sx, tr.sy, tr.ex, tr.ey, 12, 16), life: 0.3, ml: 0.3, col: '#c27bff', w: 4 }); sfx.zap();
+      for (const e of enemies) { const [ex, ey] = eCenter(e); if (segDist(ex, ey, tr.sx, tr.sy, tr.ex, tr.ey) < e.r + 20) hitEnemy(e, tr.dmg, Math.sign(tr.ex - tr.sx) || 1, 0, true); }
+    }
+  }
+  trails = trails.filter(t => t.t > 0);
+}
+function drawSkills() {
+  for (const c of cracks) { cx.globalAlpha = Math.min(1, c.life / 0.8); cx.strokeStyle = c.dmg ? '#ffb347' : '#c9a27a'; cx.lineWidth = c.dmg ? 4 : 2.5; cx.shadowColor = '#ff6a2a'; cx.shadowBlur = c.dmg ? 10 : 0; path(c.pts); cx.stroke(); cx.shadowBlur = 0; }
+  for (const f of fires) for (let i = 0; i < 3; i++) {
+    const h = 14 + Math.sin(T * 20 + f.x + i * 2) * 6; cx.globalAlpha = Math.min(1, f.life) * 0.85; cx.fillStyle = i === 1 ? '#ffd23b' : '#ff6a2a';
+    cx.beginPath(); cx.moveTo(f.x - 9 + i * 5, GY); cx.lineTo(f.x - 5 + i * 5, GY - h); cx.lineTo(f.x - 1 + i * 5, GY); cx.fill();
+  }
+  for (const t of tornados) {
+    cx.globalAlpha = Math.min(1, t.life) * 0.75; cx.strokeStyle = '#bfffd6'; cx.lineWidth = 2;
+    for (let i = 0; i < 8; i++) { const y = GY - 6 - i * 19, r = 8 + i * 5; cx.beginPath(); cx.ellipse(t.x + Math.sin(T * 14 + i) * 5, y, r, 4, 0, 0, 7); cx.stroke(); }
+  }
+  for (const tr of trails) { cx.globalAlpha = 0.45; cx.strokeStyle = '#c27bff'; cx.lineWidth = 2; cx.setLineDash([4, 6]); cx.beginPath(); cx.moveTo(tr.sx, tr.sy); cx.lineTo(tr.ex, tr.ey); cx.stroke(); cx.setLineDash([]); }
+  cx.globalAlpha = 1;
+}
+
+// ================== SKILL TREE SCREEN ==================
+function openTree(back) { treeBack = back === 'play' ? 'pause' : back; treeSel = null; state = 'tree'; }
+function treeLayout() {
+  const n = TREE.length, gap = 10, cw = Math.min(170, (W - 32 - gap * (n - 1)) / n), x0 = W / 2 - (cw * n + gap * (n - 1)) / 2, out = [];
+  TREE.forEach((br, i) => br.nodes.forEach((nd, j) => out.push({ br, nd, x: x0 + i * (cw + gap), y: 96 + j * 72, w: cw, h: 56 })));
+  return out;
+}
+function treeBtn() { return [W / 2 - 110, H / 2 + 138, 220, 32]; }
+function pauseTreeBtn() { return [W / 2 - 110, H / 2 + 60, 220, 40]; }
+function nodeState(nd) {
+  const l = lv(nd.id);
+  if (l >= nd.max) return 'max';
+  if (nd.req && !lv(nd.req)) return 'locked';
+  return sp >= nd.cost ? 'buy' : 'poor';
+}
+function treeTap(x, y) {
+  if (x > W - 60 && y < 56) { state = treeBack; return; }
+  for (const o of treeLayout()) if (x > o.x && x < o.x + o.w && y > o.y && y < o.y + o.h) { treeSel = o.nd; return; }
+  const b = [W - 176, 326, 160, 42];
+  if (treeSel && x > b[0] && x < b[0] + b[2] && y > b[1] && y < b[1] + b[3] && nodeState(treeSel) === 'buy') {
+    sp -= treeSel.cost; tl[treeSel.id] = lv(treeSel.id) + 1; sfx.up();
+    if (treeSel.id === 't_hp') { P.mhp += 20; P.hp += 20; }
+  }
+}
+function drawTree() {
+  overlay(0.88);
+  txt('🌳 CÂY KỸ NĂNG', W / 2, 40, 24, '#5dff8f');
+  txt('Điểm kỹ năng: ' + sp + '  (qua đợt +1, hạ trùm +2)', W / 2, 62, 13, '#ffe14d', 'center', 'normal');
+  cx.fillStyle = 'rgba(255,255,255,.12)'; rr(W - 54, 10, 42, 38, 10); cx.fill(); txt('✕', W - 33, 36, 20, '#fff');
+  const L = treeLayout();
+  TREE.forEach((br, i) => { const o = L[i * 3]; txt(br.n, o.x + o.w / 2, o.y - 10, 12, br.col); });
+  for (const o of L) {
+    const st = nodeState(o.nd), l = lv(o.nd.id), on = st !== 'locked';
+    if (o.nd.req) { cx.strokeStyle = lv(o.nd.req) ? o.br.col : '#444'; cx.lineWidth = 2; cx.beginPath(); cx.moveTo(o.x + o.w / 2, o.y - 16); cx.lineTo(o.x + o.w / 2, o.y); cx.stroke(); }
+    cx.fillStyle = l ? '#20306a' : '#161b40'; rr(o.x, o.y, o.w, o.h, 10); cx.fill();
+    cx.strokeStyle = treeSel === o.nd ? '#fff' : on ? o.br.col : '#3a3f66'; cx.lineWidth = treeSel === o.nd ? 3 : st === 'buy' ? 2 + Math.abs(Math.sin(T * 4)) : 1.5; cx.stroke();
+    cx.globalAlpha = on ? 1 : 0.45;
+    txt(o.nd.ic, o.x + 18, o.y + 24, 18, '#fff');
+    txt(o.nd.n, o.x + 34, o.y + 22, 12, '#fff', 'left');
+    let pips = ''; for (let k = 0; k < o.nd.max; k++) pips += k < l ? '●' : '○';
+    txt(pips, o.x + 34, o.y + 42, 12, o.br.col, 'left');
+    txt(st === 'max' ? 'TỐI ĐA' : o.nd.cost + 'đ', o.x + o.w - 8, o.y + 42, 10, st === 'buy' ? '#ffe14d' : '#8f99cc', 'right');
+    cx.globalAlpha = 1;
+  }
+  // info panel
+  cx.fillStyle = '#161b40'; rr(16, 318, W - 32, 58, 12); cx.fill(); cx.strokeStyle = '#3a3f66'; cx.lineWidth = 1.5; cx.stroke();
+  if (!treeSel) { txt('Chạm vào một kỹ năng để xem chi tiết', W / 2, 352, 13, '#c9d2ff', 'center', 'normal'); return; }
+  const nd = treeSel, st = nodeState(nd);
+  txt(nd.ic + ' ' + nd.n + ' (cấp ' + lv(nd.id) + '/' + nd.max + ')', 30, 340, 14, '#fff', 'left');
+  txt(nd.d, 30, 362, 12, '#c9d2ff', 'left', 'normal');
+  const b = [W - 176, 326, 160, 42];
+  cx.fillStyle = st === 'buy' ? '#2e8b57' : '#33385c'; rr(b[0], b[1], b[2], b[3], 10); cx.fill();
+  txt(st === 'buy' ? 'NÂNG CẤP (' + nd.cost + 'đ)' : st === 'max' ? 'ĐÃ TỐI ĐA' : st === 'locked' ? 'Cần: ' + TNODE[nd.req].n : 'Thiếu điểm', b[0] + b[2] / 2, b[1] + 26, 13, '#fff');
+}
+
 // ================== ULTIMATE (100 combo, triggered while airborne) ==================
+function ultNeed() { return 50 - 5 * lv('t_ult'); }
 function startUlt() {
   P.ultA = { ph: 'rise', t: 0 }; P.inv = 99; queued = null; P.vy = 0;
   texts.push({ x: P.x, y: P.y - 90, s: 'CHIÊU CUỐI: THIÊN LÔI GIÁNG THẾ!', col: '#ffe14d', life: 1.6, vy: -20, sz: 20 });
@@ -566,7 +756,7 @@ function updUlt(dt) {
   } else {
     P.vy = Math.min(3000, P.vy + 7000 * dt); P.y += P.vy * dt;
     afterimg.push({ x: P.x, y: P.y, f: P.f, life: 0.18 });
-    if (P.y >= GY) { P.y = GY; P.vy = 0; P.ultA = null; P.ult = false; ultNext = combo + 100; P.inv = 1.2; ultBoom(); }
+    if (P.y >= GY) { P.y = GY; P.vy = 0; P.ultA = null; P.ult = false; ultNext = combo + ultNeed(); P.inv = 1.2; ultBoom(); }
   }
 }
 function ultBoom() {
@@ -575,7 +765,7 @@ function ultBoom() {
   for (let i = 0; i < 9; i++) { let x = P.x, y = GY, pts = [[x, y]]; const dir = i % 2 ? 1 : -1; for (let j = 0; j < 8; j++) { x += dir * rnd(30, 90); y = GY + rnd(2, H - GY - 4); pts.push([x, y]); } cracks.push(pts); }
   quake = { life: 1.4, x: P.x, cracks };
   for (const e of [...enemies]) {
-    const d = e.type === 'boss' ? e.mhp * 0.12 + 120 * dmgMult() : 160 * dmgMult() + e.mhp * 0.3;
+    const um = 1 + 0.2 * lv('t_ult'), d = (e.type === 'boss' ? e.mhp * 0.12 + 120 * dmgMult() : 160 * dmgMult() + e.mhp * 0.3) * um;
     hitEnemy(e, d, Math.sign(e.x - P.x) || 1, 0, true);
     if (e.type !== 'boss' && e.hp > 0) { e.vy = -520; e.air = true; e.stun = 1.2; }
   }
@@ -602,9 +792,11 @@ function update(dt) {
   if (state !== 'play') return;
 
   // ---- player ----
-  P.inv -= dt; P.hurtT -= dt; P.slashT -= dt; P.anim += dt;
+  P.inv -= dt; P.hurtT -= dt; P.slashT -= dt; P.anim += dt; P.upT -= dt; P.upCd -= dt; P.linkT -= dt;
+  if (lv('t_regen')) P.hp = Math.min(P.mhp, P.hp + lv('t_regen') * dt);
+  if (ptr && !ptr.done && performance.now() - ptr.t > 170) { ptr.done = true; tryDash(ptr.x, ptr.y); } // long press = dash
   P.en = Math.min(P.men, P.en + 32 * up.regen * dt);
-  if (P.ult && !P.ultA && !P.dash && P.y < GY - 35) startUlt();
+  if (P.ult && !P.ultA && !P.dash && !P.pound && P.y < GY - 35) startUlt();
   if (P.ultA) updUlt(dt);
   else if (P.dash) {
     const D = P.dash; const k0 = Math.min(1, D.t / D.d); D.t += dt; const k = Math.min(1, D.t / D.d);
@@ -615,13 +807,15 @@ function update(dt) {
       if (D.hit.has(e) || e.hp <= 0) continue;
       const [ex, ey] = eCenter(e);
       const w = P.wpn && !WEAPONS[P.wpn.k].ammo ? WEAPONS[P.wpn.k] : null;
-      if (segDist(ex, ey, ax, ay, bx, by) < e.r + 16 + (w && w.reach || 0)) { D.hit.add(e); hitEnemy(e, 20 * dmgMult() * (w ? w.m : 1), P.f, up.chain); }
+      if (segDist(ex, ey, ax, ay, bx, by) < e.r + 16 + (w && w.reach || 0)) { D.hit.add(e); hitEnemy(e, 20 * dmgMult() * (w ? w.m : 1) * (1 + 0.15 * lv('t_dash')) * (P.linkT > 0 ? 1.5 + 0.5 * lv('t_link') : 1), P.f, up.chain); }
     }
     for (const d of drops) if (d.cool <= 0 && !d.dead && segDist(d.x, d.y, ax, ay, bx, by) < 32) { d.dead = true; equip(d.k, d.dur); }
     for (const b of bombs) if (!b.dead && segDist(b.x, b.y, ax, ay, bx, by) < 24) { b.dead = true; score += 5; sparks(b.x, b.y, '#ffd23b', 10); say('ĐÁ VĂNG!', '#ffd23b', b.x, b.y - 20, 12); }
     for (const a of arrows) if (!a.dead && segDist(a.x, a.y, ax, ay, bx, by) < 20) { a.dead = true; score += 5; for (let i = 0; i < 6; i++) parts.push({ x: a.x, y: a.y, vx: rnd(-150, 150), vy: rnd(-150, 50), life: 0.3, ml: 0.3, col: '#ffe14d', sz: 2, g: 300 }); }
     if (k >= 1) {
       P.dash = null; P.slashT = 0.2; P.vx = 0; P.vy = P.y < GY - 2 ? -160 : 0; P.inv = Math.max(P.inv, 0.12);
+      if (lv('t_trail')) trails.push({ sx: D.sx, sy: D.sy, ex: D.ex, ey: D.ey, t: 0.3, dmg: 12 * lv('t_trail') * dmgMult() });
+      if (D.hit.size && P.linkT > 0) { P.linkT = 0; say('LIÊN HOÀN!', '#5dff8f'); }
       if (D.hit.size && P.wpn && !WEAPONS[P.wpn.k].ammo && --P.wpn.dur <= 0) { sparks(P.x, P.y - 30, '#ccc', 14); say(WEAPONS[P.wpn.k].n + ' đã gãy!', '#ff8fa3'); P.wpn = null; }
       if (up.storm) {
         const cx0 = P.x, cy0 = P.y - 25, R = 70 + 15 * up.storm;
@@ -630,7 +824,8 @@ function update(dt) {
       }
       if (queued) { const q = queued; queued = null; tryDash(q[0], q[1]); }
     }
-  } else {
+  } else if (P.pound) updPound(dt);
+  else {
     let mv = 0; if (keys['a'] || keys['arrowleft']) mv--; if (keys['d'] || keys['arrowright']) mv++;
     P.moving = mv !== 0; if (mv) P.f = mv;
     if ((keys['w'] || keys['arrowup']) && P.y >= GY) P.vy = -560;
@@ -640,11 +835,12 @@ function update(dt) {
   }
 
   updWeapons(dt);
+  updSkills(dt);
   for (const r of rings) r.life -= dt; rings = rings.filter(r => r.life > 0);
 
   // ---- spawning ----
   spawnT -= dt;
-  const maxAlive = 4 + Math.floor(wave * 0.8);
+  const maxAlive = Math.min(20, Math.round((4 + Math.floor(wave * 0.8)) * crowd()));
   if (toSpawn.length && spawnT <= 0 && enemies.length < maxAlive) { spawn(toSpawn.shift()); spawnT = Math.max(0.35, 1.4 - wave * 0.08); }
 
   // ---- enemies ----
@@ -690,11 +886,11 @@ function update(dt) {
   marks = marks.filter(m => m.life > 0);
 
   comboT -= dt; if (comboT <= 0) combo = 0;
-  if (combo === 0 && !P.ult) ultNext = 100;
+  if (combo === 0 && !P.ult) ultNext = ultNeed();
 
   if (!toSpawn.length && !enemies.length) {
     clearT += dt;
-    if (clearT > 1.2) { clearT = 0; state = 'upgrade'; cardT = T; makeCards(); }
+    if (clearT > 1.2) { clearT = 0; state = 'upgrade'; cardT = T; sp += wave % 5 === 0 ? 2 : 1; makeCards(); }
   } else clearT = 0;
 }
 
@@ -956,6 +1152,8 @@ function drawPlayer() {
   let pose;
   if (P.ult && !P.ultA) { const r = 34 + Math.sin(T * 8) * 4; cx.strokeStyle = 'rgba(255,225,77,' + (0.5 + 0.3 * Math.sin(T * 8)) + ')'; cx.lineWidth = 3; cx.beginPath(); cx.arc(P.x, P.y - 30, r, 0, 7); cx.stroke(); }
   if (P.ultA) pose = P.ultA.ph === 'rise' ? POSE.fist() : POSE.smash();
+  else if (P.pound) pose = POSE.smash();
+  else if (P.upT > 0) pose = POSE.upper();
   else if (P.dash) pose = POSE.dash();
   else if (P.hurtT > 0) pose = POSE.hurt();
   else if (P.slashT > 0) pose = POSE.slash();
@@ -1063,16 +1261,10 @@ function drawHUD() {
   txt('Đợt ' + wave, W - 70, pad + 14, 16, '#fff', 'right');
   txt(score.toLocaleString('vi-VN') + ' điểm', W - 70, pad + 34, 13, '#ffe14d', 'right');
   // held weapon + shield
-  if (P.wpn) { const w = WEAPONS[P.wpn.k]; txt(w.ic + ' ' + w.n + (w.ammo ? ' x' + P.wpn.dur : ' · bền ' + P.wpn.dur), pad, pad + 46, 13, w.col, 'left'); }
+  if (P.wpn) { const w = WEAPONS[P.wpn.k]; txt(w.ic + ' ' + w.n + (w.ammo ? ' x' + P.wpn.dur : ' · bền ' + P.wpn.dur) + ' · vuốt để ném', pad, pad + 46, 13, w.col, 'left'); }
   else txt('Tay không (katana)', pad, pad + 46, 12, '#8fa3d9', 'left', 'normal');
   if (up.shield) txt(P.shield ? '🛡️' : '🛡️ ' + Math.ceil(P.shT) + 's', pad + 198, pad + 13, 13, P.shield ? '#4fd8ff' : '#667', 'left');
-  // throw button
-  const [bx, by] = throwBtn(), on = !!P.wpn;
-  cx.fillStyle = on ? 'rgba(79,216,255,.22)' : 'rgba(255,255,255,.08)'; cx.beginPath(); cx.arc(bx, by, 38, 0, 7); cx.fill();
-  cx.strokeStyle = on ? WEAPONS[P.wpn.k].col : 'rgba(255,255,255,.25)'; cx.lineWidth = 2.5; cx.stroke();
-  if (on) { cx.save(); cx.translate(bx - 8, by - 4); cx.rotate(-0.7); cx.translate(-14, 0); wDraw(P.wpn.k); cx.restore(); }
-  txt('NÉM', bx, by + 26, 11, on ? '#fff' : 'rgba(255,255,255,.4)');
-  if (on && WEAPONS[P.wpn.k].ammo) txt('x' + P.wpn.dur, bx + 24, by - 20, 12, '#ffe14d');
+  if (sp > 0) txt('🌳 ' + sp + ' điểm kỹ năng', W - 70, pad + 52, 12, '#5dff8f', 'right');
   // pause btn
   cx.fillStyle = 'rgba(255,255,255,.15)'; rr(W - 50, 10, 38, 38, 10); cx.fill(); cx.fillStyle = '#fff'; cx.fillRect(W - 37, 21, 4, 16); cx.fillRect(W - 29, 21, 4, 16);
   if (combo >= 3) {
@@ -1083,9 +1275,9 @@ function drawHUD() {
     cx.globalAlpha = 1;
   }
   // ultimate meter
-  const prog = P.ult ? 1 : clamp(1 - (ultNext - combo) / 100, 0, 1), uw = 150;
+  const need = ultNeed(), prog = P.ult ? 1 : clamp(1 - (ultNext - combo) / need, 0, 1), uw = 150;
   bar(W / 2 - uw / 2, 74, uw, 7, prog, P.ult ? (Math.sin(T * 10) > 0 ? '#ffe14d' : '#fff') : '#ffb84d', 'rgba(0,0,0,.45)');
-  txt(P.ult ? '⚡ CHIÊU CUỐI SẴN SÀNG — LƯỚT LÊN KHÔNG!' : 'Chiêu cuối ' + Math.round(prog * 100) + '/100 combo', W / 2, 94, 10, P.ult ? '#ffe14d' : '#c9d2ff', 'center', P.ult ? 'bold' : 'normal');
+  txt(P.ult ? '⚡ CHIÊU CUỐI SẴN SÀNG — LƯỚT LÊN KHÔNG!' : 'Chiêu cuối ' + Math.round(prog * need) + '/' + need + ' combo', W / 2, 94, 10, P.ult ? '#ffe14d' : '#c9d2ff', 'center', P.ult ? 'bold' : 'normal');
   const boss = enemies.find(e => e.type === 'boss');
   if (boss) { const w = Math.min(420, W * 0.6); txt(boss.name, W / 2, H - 30, 12, boss.col); bar(W / 2 - w / 2, H - 22, w, 10, boss.hp / boss.mhp, boss.col, 'rgba(0,0,0,.5)'); }
   if (banner > 0) {
@@ -1107,8 +1299,8 @@ function drawMenu() {
   cx.shadowBlur = 0;
   stick(W / 2, y0 + 150, 1.6, '#fff', 1, POSE.idle(T));
   if (Math.sin(T * 4) > -0.3) txt('Chạm để bắt đầu', W / 2, y0 + 200, 20, '#ffe14d');
-  txt('Chạm để lướt · Nhặt & ném vũ khí · 100 combo + bay trên không = CHIÊU CUỐI', W / 2, y0 + 232, 13, '#c9d2ff', 'center', 'normal');
-  txt('Máy tính: chuột để lướt · A/D di chuyển · W nhảy · Space lướt tới địch gần nhất · F / chuột phải: ném', W / 2, y0 + 252, 11, '#8f99cc', 'center', 'normal');
+  txt('Chạm: lướt · Vuốt: ném vũ khí · Vuốt lên: Hất Tung · Trên không vuốt xuống: Dộng Đất · 50 combo: CHIÊU CUỐI', W / 2, y0 + 232, 12, '#c9d2ff', 'center', 'normal');
+  txt('Máy tính: chuột lướt · F/chuột phải ném · E hất tung · S dộng đất · W nhảy · A/D đi · T cây kỹ năng', W / 2, y0 + 252, 11, '#8f99cc', 'center', 'normal');
   if (best) txt('Kỷ lục: ' + best.toLocaleString('vi-VN'), W / 2, y0 + 278, 14, '#fff');
   if (innerHeight > innerWidth) txt('↻ Xoay ngang điện thoại để chơi tốt hơn', W / 2, H - 30, 14, '#ff8fa3', 'center', 'normal');
 }
@@ -1128,7 +1320,9 @@ function drawUpgrade() {
     wrap(c.u.d, cxm, c.y + 110, c.w - 18, 15, 12, '#c9d2ff');
   }
   const own = UPS.filter(u => up.owned[u.id]).map(u => u.ic + (up.owned[u.id] > 1 ? '×' + up.owned[u.id] : '')).join('  ');
-  if (own) txt('Đã có: ' + own, W / 2, H / 2 + 128, 13, '#c9d2ff', 'center', 'normal');
+  if (own) txt('Đã có: ' + own, W / 2, H / 2 + 126, 13, '#c9d2ff', 'center', 'normal');
+  const tb = treeBtn(); cx.fillStyle = sp ? '#2e8b57' : '#33385c'; rr(tb[0], tb[1], tb[2], tb[3], 10); cx.fill();
+  txt('🌳 Cây kỹ năng · ' + sp + ' điểm', W / 2, tb[1] + 21, 13, '#fff');
 }
 function wrap(s, x, y, mw, lh, sz, col) {
   cx.font = sz + 'px "Segoe UI",Roboto,sans-serif'; const words = s.split(' '); let line = '';
@@ -1160,6 +1354,7 @@ function draw() {
     cx.fillStyle = lg; cx.fillRect(0, GY - 120 * k, W, 120 * k);
     cx.strokeStyle = 'rgba(255,240,180,' + k + ')'; cx.lineWidth = 3; for (const c of quake.cracks) { path(c); cx.stroke(); }
   }
+  drawSkills();
   for (const m of marks) {
     const k = 1 - m.life / m.ml; cx.globalAlpha = 0.4 + 0.5 * k; cx.strokeStyle = m.col; cx.lineWidth = 3;
     cx.beginPath(); cx.ellipse(m.x, GY, 30, 7, 0, 0, 7); cx.stroke(); cx.beginPath(); cx.ellipse(m.x, GY, 30 * k, 7 * k, 0, 0, 7); cx.fillStyle = m.col; cx.fill();
@@ -1189,11 +1384,15 @@ function draw() {
   cx.restore();
   if (flash > 0) { cx.fillStyle = 'rgba(255,60,80,' + flash * 0.8 + ')'; cx.fillRect(0, 0, W, H); }
   if (wflash > 0) { cx.fillStyle = 'rgba(255,250,220,' + Math.min(1, wflash) + ')'; cx.fillRect(0, 0, W, H); }
-  if (state === 'play' || state === 'pause' || state === 'upgrade') drawHUD();
+  if (state === 'play' || state === 'pause' || state === 'upgrade' || state === 'tree') drawHUD();
   if (state === 'menu') drawMenu();
   else if (state === 'upgrade') drawUpgrade();
   else if (state === 'over') drawOver();
-  else if (state === 'pause') { overlay(0.55); txt('TẠM DỪNG', W / 2, H / 2, 36, '#fff'); txt('Chạm để tiếp tục', W / 2, H / 2 + 34, 15, '#c9d2ff', 'center', 'normal'); }
+  else if (state === 'pause') {
+    overlay(0.55); txt('TẠM DỪNG', W / 2, H / 2, 36, '#fff'); txt('Chạm để tiếp tục', W / 2, H / 2 + 34, 15, '#c9d2ff', 'center', 'normal');
+    const b = pauseTreeBtn(); cx.fillStyle = '#2e8b57'; rr(b[0], b[1], b[2], b[3], 10); cx.fill(); txt('🌳 Cây kỹ năng · ' + sp + ' điểm', W / 2, b[1] + 25, 14, '#fff');
+  }
+  else if (state === 'tree') drawTree();
 }
 
 // ================== LOOP ==================
