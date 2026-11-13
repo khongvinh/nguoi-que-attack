@@ -26,7 +26,16 @@ Game hành động người que chạy trên trình duyệt (HTML5 Canvas, một
 - **Chiêu cuối – Thiên Lôi Giáng Thế**: đạt **50 combo** rồi lướt lên không trung → người que bay lên tụ sét rồi đấm thẳng xuống đất,
   nổ toàn bộ mặt đất: đánh trúng mọi kẻ địch, xoá hết tên/bom/sét đang bay. Thanh "Chiêu cuối" ở giữa trên màn hình cho biết tiến độ.
 
-## Màn chơi
+## Chế độ VƯỢT ẢI (mới)
+Chọn **🗺️ VƯỢT ẢI** ở menu: 8 ải cuộn ngang, vừa đánh vừa vượt chướng ngại vật xen lẫn câu đố. Tiến độ, số sao và cây kỹ năng của chế độ này được lưu lại.
+- **Địa hình**: vực sâu (rơi xuống mất 20 máu, quay về cờ), bục cao, bục nổi, bục di chuyển, thang máy.
+- **Chướng ngại**: bãi gai, tia laser bật/tắt theo nhịp (đang lướt vẫn bị bỏng).
+- **Giải đố mở cổng**: cột **?** ra câu đố 4 đáp án (đúng +1 điểm kỹ năng, sai -10 máu), **cần gạt** trên bục (lướt chém / ném trúng),
+  **công tắc đèn** (mỗi công tắc đảo đèn của nó và 2 đèn kế bên — bật sáng cả 4 đèn).
+- **Chiến đấu**: quái đặt sẵn trên đường, **vòng vây** khóa màn hình tới khi hạ hết, trùm ở ải 2, 4, 6, 8.
+- **Cờ hồi sinh**, 3 mạng mỗi ải; hoàn thành nhận 1–3 sao (3 sao: không gục, không đố sai) và điểm kỹ năng.
+
+## Màn chơi (Đấu trường)
 Mỗi 5 đợt đổi màn (đợt thứ 5 là trùm), sau màn 4 quay vòng và mạnh hơn:
 1. **Đêm Trăng** – trùm *Chúa Tể Bóng Đêm*
 2. **Sa Mạc Hoàng Hôn** (bão cát) – trùm *Vua Cát*
